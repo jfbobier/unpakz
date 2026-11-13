@@ -10,6 +10,10 @@ public enum ArchiveError
     Unsupported,
     /// <summary>A configured safety limit was exceeded.</summary>
     LimitExceeded,
+    /// <summary>An entry name or destination state would let extraction escape or misbehave (traversal, reserved name, symlink in path).</summary>
+    UnsafePath,
+    /// <summary>Entries collide with each other or with existing files and policy forbids proceeding.</summary>
+    Conflict,
 }
 
 /// <summary>The only exception type decoders and parsers may throw for bad input.</summary>

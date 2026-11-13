@@ -7,20 +7,22 @@ namespace Unpakz.Tests.Support;
 /// <summary>Independent, byte-exact ZIP writer used only to build fixtures. Shares no code with the parser under test.</summary>
 internal sealed class ZipBuilder
 {
-    internal sealed record Item(string Name, byte[] Data, ushort Method, bool Utf8, bool Zip64Extra);
+    internal sealed record Item(string Name, byte[] Data, ushort Method, bool Utf8, bool Zip64Extra, uint? Attr);
 
     private readonly List<Item> _items = [];
 
     public bool ForceZip64Eocd { get; set; }
     public byte[] Comment { get; set; } = [];
 
-    public ZipBuilder Add(string name, byte[] data, bool deflate = false, bool utf8 = true, bool zip64Extra = false)
+    public ZipBuilder Add(string name, byte[] data, bool deflate = false, bool utf8 = true, bool zip64Extra = false, uint? externalAttrs = null)
     {
-        _items.Add(new Item(name, data, deflate ? (ushort)8 : (ushort)0, utf8, zip64Extra));
+        _items.Add(new Item(name, data, deflate ? (ushort)8 : (ushort)0, utf8, zip64Extra, externalAttrs));
         return this;
     }
 
     public ZipBuilder AddDirectory(string name) => Add(name.EndsWith('/') ? name : name + "/", []);
+
+    public const uint SymlinkAttr = 0xA1FF0000, FifoAttr = 0x11A40000, DirModeAttr = 0x41ED0000;
 
     public byte[] Build()
     {
@@ -78,7 +80,7 @@ internal sealed class ZipBuilder
             W16(h, 28, (ushort)nameBytes.Length);
             W16(h, 30, (ushort)extra.Length);
             W16(h, 32, 0); W16(h, 34, 0); W16(h, 36, 0);
-            W32(h, 38, it.Name.EndsWith('/') ? 0x41ED0010u : 0x81A40000u);
+            W32(h, 38, it.Attr ?? (it.Name.EndsWith('/') ? 0x41ED0010u : 0x81A40000u));
             W32(h, 42, lo);
             ms.Write(h);
             ms.Write(nameBytes);

@@ -11,7 +11,8 @@ case "$mode" in
     ;;
   full)
     "$0" fast
-    echo "full: conformance/fuzz-smoke/mutation stages not implemented yet (M1+)"
+    python3 harness/mutate.py        # ~15 min: every guard must be killed by a test
+    echo "full: fuzz-smoke stage not implemented yet"
     ;;
   *) echo "usage: $0 fast|full" >&2; exit 2 ;;
 esac

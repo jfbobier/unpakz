@@ -16,4 +16,7 @@ public sealed record ZipEntryInfo(
     public bool IsEncrypted => (Flags & 1) != 0;
 
     public bool IsDirectory => Name.Length > 0 && Name[^1] is '/' or '\\';
+
+    /// <summary>POSIX file-type bits (S_IFMT) when the entry was made on Unix, otherwise 0 (unknown / regular).</summary>
+    public uint UnixFileType => (VersionMadeBy >> 8) == 3 ? (ExternalAttributes >> 16) & 0xF000 : 0;
 }

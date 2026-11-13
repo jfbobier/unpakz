@@ -82,3 +82,15 @@ exact-size + CRC verification, bounded writes), IOutputSink, 7-Zip differential 
 132 tests; every guard mutation-verified (parser 5/5, extractor 11/11 after adding 3 tests for survivors, CRC 2/2, differential 2/2).
 Known gaps / next: engine pipeline (real file sink, PathGuard integration, case-collision/duplicate/reparse handling, overlap detection),
 CLI, I/O proofs (single write, no temp dir), SFX-prefixed archives, Unicode path extra (0x7075), AES, Deflate64, hardware CRC (needs benchmark first).
+
+## M1 status update: engine pipeline + security suite
+Done: ExtractionPlanner (pure, I/O-free, refuses before any write), ZipExtractor (plan -> create dest -> per-file link check -> decode into same-dir
+temp file -> verify size+CRC -> rename), IFileSystem with LocalFileSystem + test InMemoryFileSystem (operation log), DosTime, cancellation, progress.
+Security rules enforced and tested: traversal/rooted/UNC/drive-relative, reserved device names, ADS, trailing dot/space, case-insensitive duplicates,
+file/dir collisions, symlink + special entries skipped (never created), pre-existing symlink/junction in destination path refused, symlink at final
+path replaced not followed, overlap detection (header+data ranges), total size/path length/entry limits, hostile preallocation not trusted,
+late-appearing file never overwritten (race), failure never leaves temp files, nothing ever outside destination (sweeps).
+Proofs: bytes written == bytes extracted; temp file always in the final directory (rename, not copy); no scratch directories; same on real FS.
+Harness: harness/mutate.py + harness/mutations.py (62 mutants, all killed; run by `./harness.sh full`). Differential vs 7-Zip: archive creation and full-tree extraction.
+Not yet: parallel execution, Windows sink (handle-relative opens to close the check/use window on directories), 8.3 short-name aliases,
+NTFS junction handling verified on Windows, CLI, benchmarks.

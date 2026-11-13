@@ -60,6 +60,13 @@ public static class ZipEntryExtractor
 
     private static ReadOnlyMemory<byte> LocateData(ReadOnlyMemory<byte> zip, ZipEntryInfo entry)
     {
+        var (start, length) = LocateRange(zip, entry);
+        return zip.Slice((int)start, (int)length);
+    }
+
+    /// <summary>Validated byte range of the entry's data inside the archive.</summary>
+    internal static (ulong Start, ulong Length) LocateRange(ReadOnlyMemory<byte> zip, ZipEntryInfo entry)
+    {
         var len = (ulong)zip.Length;
         var lho = entry.LocalHeaderOffset;
         if (lho > len || len - lho < LocalFixed) throw new ArchiveException("Local header outside archive.");
@@ -70,7 +77,7 @@ public static class ZipEntryExtractor
         var start = lho + LocalFixed + BinaryPrimitives.ReadUInt16LittleEndian(h[26..]) + (ulong)BinaryPrimitives.ReadUInt16LittleEndian(h[28..]);
         if (start > len || entry.CompressedSize > len - start) throw new ArchiveException("Entry data extends past the archive.");
 
-        return zip.Slice((int)start, (int)entry.CompressedSize);
+        return (start, entry.CompressedSize);
     }
 
     private static uint CopyStored(ReadOnlyMemory<byte> data, IOutputSink sink)
