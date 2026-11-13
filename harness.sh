@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Single entry point for verification. Usage: ./harness.sh fast|full
 set -euo pipefail
+export UNPAKZ_REQUIRE_ORACLE=1
 cd "$(dirname "$0")"
 mode="${1:-fast}"
 case "$mode" in

@@ -75,3 +75,10 @@ Vulkan binding: Silk.NET.Vulkan (MIT) or raw P/Invoke; shaders as precompiled SP
 
 ## M0 status
 Done: props (warnings-as-errors, nullable, analyzers), PathGuard + 63 tests, mutation sanity check (3/3 killed), harness.sh fast.
+
+## M1 status
+Done: ZIP/ZIP64 central directory parser, entry extractor (stored + deflate via zlib-ng baseline, CRC-32 slicing-by-8, 1032:1 ratio bound,
+exact-size + CRC verification, bounded writes), IOutputSink, 7-Zip differential tests (Copy, Deflate -mx1/5/9, 20 MB + 2000 small files, Unicode names).
+132 tests; every guard mutation-verified (parser 5/5, extractor 11/11 after adding 3 tests for survivors, CRC 2/2, differential 2/2).
+Known gaps / next: engine pipeline (real file sink, PathGuard integration, case-collision/duplicate/reparse handling, overlap detection),
+CLI, I/O proofs (single write, no temp dir), SFX-prefixed archives, Unicode path extra (0x7075), AES, Deflate64, hardware CRC (needs benchmark first).
