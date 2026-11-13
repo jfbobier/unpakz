@@ -1,0 +1,3 @@
+# Tests only: descriptive snake_case method names are intentional.
+[*.cs]
+dotnet_diagnostic.CA1707.severity = none
