@@ -1,6 +1,6 @@
 using System;
 
-namespace Zipx.Core;
+namespace Unpakz.Core;
 
 public enum ArchiveError
 {

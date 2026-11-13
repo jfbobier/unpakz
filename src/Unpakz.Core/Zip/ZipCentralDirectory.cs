@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Zipx.Core.Zip;
+namespace Unpakz.Core.Zip;
 
 /// <summary>
 /// Parses and validates the ZIP central directory (including ZIP64). Every field is treated as hostile:

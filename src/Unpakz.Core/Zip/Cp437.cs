@@ -1,4 +1,4 @@
-namespace Zipx.Core.Zip;
+namespace Unpakz.Core.Zip;
 
 /// <summary>IBM code page 437, the legacy ZIP name encoding when the UTF-8 flag is not set.</summary>
 internal static class Cp437

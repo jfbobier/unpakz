@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text;
 
-namespace Zipx.Tests.Support;
+namespace Unpakz.Tests.Support;
 
 /// <summary>Independent, byte-exact ZIP writer used only to build fixtures. Shares no code with the parser under test.</summary>
 internal sealed class ZipBuilder

@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <InternalsVisibleTo Include="Zipx.Tests" />
+    <InternalsVisibleTo Include="Unpakz.Tests" />
   </ItemGroup>
 </Project>

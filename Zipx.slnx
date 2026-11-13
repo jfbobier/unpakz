@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Zipx.Core/Zipx.Core.csproj" />
-    <Project Path="src/Zipx.Engine/Zipx.Engine.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Zipx.Tests/Zipx.Tests.csproj" />
-  </Folder>
-</Solution>

@@ -1,10 +1,10 @@
 using System.Buffers.Binary;
 using System.Text;
-using Zipx.Core;
-using Zipx.Core.Zip;
-using Zipx.Tests.Support;
+using Unpakz.Core;
+using Unpakz.Core.Zip;
+using Unpakz.Tests.Support;
 
-namespace Zipx.Tests;
+namespace Unpakz.Tests;
 
 public class ZipCentralDirectoryTests
 {

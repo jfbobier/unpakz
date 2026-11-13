@@ -1,6 +1,6 @@
-using Zipx.Engine;
+using Unpakz.Engine;
 
-namespace Zipx.Tests;
+namespace Unpakz.Tests;
 
 /// <summary>Executable spec for the single chokepoint that validates archive entry names.</summary>
 public class PathGuardTests

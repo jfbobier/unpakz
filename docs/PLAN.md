@@ -1,4 +1,4 @@
-# Zipx plan
+# Unpakz plan
 
 ## Goal
 Fast, small, safe, extraction-only archive tool for Windows (ZIP/ZIP64 first, RAR5 then RAR4), with a minimal GUI and
@@ -16,13 +16,13 @@ default-app association. Target machine: Ryzen 9800X3D (Zen 5, AVX-512), 64 GB R
 
 ## Architecture
 ```
-Zipx.Core       pure decoders + format parsers (ZIP, ZIP64, RAR5, later RAR4). No I/O, no OS.
-Zipx.Engine     extraction pipeline: planner -> parallel workers -> sink. PathGuard, limits, progress.
-Zipx.Windows    sinks (pre-sized files, overlapped I/O, no-buffering for big files), long paths, ADS/reserved-name rules, file times/attrs.
-Zipx.Gpu        Vulkan compute experiment (separate assembly, optional, behind a gate).
-Zipx.Cli        thin CLI over Engine.
-Zipx.App        WinForms GUI (open, list, extract here, extract to...; Explorer verb via file association).
-tests/          Zipx.Tests (unit/property), Zipx.Conformance (corpus + differential), Zipx.Fuzz, Zipx.Security
+Unpakz.Core       pure decoders + format parsers (ZIP, ZIP64, RAR5, later RAR4). No I/O, no OS.
+Unpakz.Engine     extraction pipeline: planner -> parallel workers -> sink. PathGuard, limits, progress.
+Unpakz.Windows    sinks (pre-sized files, overlapped I/O, no-buffering for big files), long paths, ADS/reserved-name rules, file times/attrs.
+Unpakz.Gpu        Vulkan compute experiment (separate assembly, optional, behind a gate).
+Unpakz.Cli        thin CLI over Engine.
+Unpakz.App        WinForms GUI (open, list, extract here, extract to...; Explorer verb via file association).
+tests/          Unpakz.Tests (unit/property), Unpakz.Conformance (corpus + differential), Unpakz.Fuzz, Unpakz.Security
 bench/          BenchmarkDotNet suites + committed results
 ```
 
@@ -48,7 +48,7 @@ Vulkan binding: Silk.NET.Vulkan (MIT) or raw P/Invoke; shaders as precompiled SP
 ## The verification harness (the main exercise)
 1. **Spec conformance**: PKWARE APPNOTE clauses mapped to test names; RAR5 notes likewise. Each clause -> at least one test.
 2. **Corpus**: generated (synthetic, deterministic, via our own writer helpers and 7z/Info-ZIP on Windows) + external public vectors in `corpus/external/` with SHA-256 manifest. RAR files cannot be generated without the proprietary `rar`, so we need existing archives (WinRAR installed?) or public test vectors.
-3. **Differential testing**: extract the same archive with Zipx and 7-Zip; compare the tree (names, bytes, sizes, mtimes, attributes) bit-for-bit.
+3. **Differential testing**: extract the same archive with Unpakz and 7-Zip; compare the tree (names, bytes, sizes, mtimes, attributes) bit-for-bit.
 4. **Security suite**: zip-slip (`..\`, absolute, UNC, drive-relative `C:foo`), reserved device names (CON, NUL, COM1), trailing dot/space, alternate data streams (`a.txt:evil`), case-collisions, symlink/reparse entries, duplicate names, overlapping entries, ZIP64 overflow fields, bogus counts, zip bombs (ratio and total-size limits), nested archives, long paths.
 5. **Robustness**: truncate at every byte offset, flip every byte (sampled), property-based tests (FsCheck), coverage-guided fuzzing of the parsers (SharpFuzz/libFuzzer-style) with a stored regression corpus.
 6. **I/O proofs**: a counting sink test (bytes written == bytes extracted), a file-system watcher/ETW test that proves no temp directory and no second write.

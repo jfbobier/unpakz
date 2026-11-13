@@ -1,4 +1,4 @@
-namespace Zipx.Core.Zip;
+namespace Unpakz.Core.Zip;
 
 public sealed class ZipLimits
 {

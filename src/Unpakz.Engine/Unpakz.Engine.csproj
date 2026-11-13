@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Zipx.Core\Zipx.Core.csproj" />
+    <ProjectReference Include="..\Unpakz.Core\Unpakz.Core.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Unpakz.Core/Unpakz.Core.csproj" />
+    <Project Path="src/Unpakz.Engine/Unpakz.Engine.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Unpakz.Tests/Unpakz.Tests.csproj" />
+  </Folder>
+</Solution>

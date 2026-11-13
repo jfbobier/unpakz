@@ -1,4 +1,4 @@
-namespace Zipx.Core.Zip;
+namespace Unpakz.Core.Zip;
 
 /// <summary>One validated central-directory record. Sizes/offsets are already ZIP64-resolved.</summary>
 public sealed record ZipEntryInfo(

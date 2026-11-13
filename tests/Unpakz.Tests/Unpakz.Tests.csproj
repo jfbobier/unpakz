@@ -19,8 +19,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Zipx.Engine\Zipx.Engine.csproj" />
-    <ProjectReference Include="..\..\src\Zipx.Core\Zipx.Core.csproj" />
+    <ProjectReference Include="..\..\src\Unpakz.Engine\Unpakz.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Unpakz.Core\Unpakz.Core.csproj" />
   </ItemGroup>
 
 </Project>

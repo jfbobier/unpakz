@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace Zipx.Engine;
+namespace Unpakz.Engine;
 
 /// <summary>Why an archive entry name was refused.</summary>
 public enum PathRejection
