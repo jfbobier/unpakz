@@ -29,6 +29,25 @@ internal static class Oracle
         return false;
     }
 
+    /// <summary>RARLAB's rar (trial), unpacked to tools/rar by the project setup; override with UNPAKZ_RAR.</summary>
+    public static bool TryGetRar(out string rar, out string unrar)
+    {
+        rar = Environment.GetEnvironmentVariable("UNPAKZ_RAR") ?? string.Empty;
+        if (rar.Length == 0)
+        {
+            for (var d = new DirectoryInfo(AppContext.BaseDirectory); d is not null; d = d.Parent)
+            {
+                var candidate = Path.Combine(d.FullName, "tools", "rar", OperatingSystem.IsWindows() ? "rar.exe" : "rar");
+                if (File.Exists(candidate)) { rar = candidate; break; }
+            }
+        }
+
+        unrar = rar.Length > 0 ? Path.Combine(Path.GetDirectoryName(rar)!, OperatingSystem.IsWindows() ? "unrar.exe" : "unrar") : string.Empty;
+        if (rar.Length > 0 && File.Exists(rar) && File.Exists(unrar)) return true;
+        if (Required) throw new InvalidOperationException("rar/unrar oracle required (UNPAKZ_REQUIRE_ORACLE=1) but tools/rar was not found.");
+        return false;
+    }
+
     public static int Run(string exe, IEnumerable<string> args, string? workDir, out string output)
     {
         var psi = new ProcessStartInfo(exe)

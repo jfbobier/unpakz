@@ -8,6 +8,9 @@ EXT = "src/Unpakz.Engine/ArchiveExtractor.cs"
 LFS = "src/Unpakz.Engine/LocalFileSystem.cs"
 DOS = "src/Unpakz.Core/Zip/DosTime.cs"
 ZAR = "src/Unpakz.Core/Zip/ZipArchive.cs"
+RAR = "src/Unpakz.Core/Rar/Rar5Archive.cs"
+VIN = "src/Unpakz.Core/Rar/VInt.cs"
+STO = "src/Unpakz.Core/StoredData.cs"
 
 MUTANTS = [
     # --- PathGuard
@@ -82,6 +85,54 @@ MUTANTS = [
     ("F2", LFS, "if ((a & FileAttributes.ReparsePoint) != 0) return PathKind.ReparsePoint;", ""),
     ("F5", LFS, "if (lastWriteLocal is { } t) File.SetLastWriteTime(temp, t);", ""),
     ("F6", LFS, "try { File.Delete(temp); }", "try { }"),
+    # --- RAR vint / stored data
+    ("V1", VIN, "if (i == 9 && payload > 1) return false;", ""),
+    ("V2", VIN, "i < data.Length && i < 10;", "i < data.Length && i < 11;"),
+    ("V3", VIN, "value |= payload << (7 * i);", "value = payload << (7 * i);"),
+    ("V4", VIN, "if ((b & 0x80) == 0)", "if ((b & 0x80) != 0)"),
+    ("S1", STO, "crc = Checksums.Crc32.Update(crc, chunk);", ""),
+    ("S2", STO, "sink.Write(chunk);   // straight from the archive bytes: no intermediate copy", ""),
+    ("S3", STO, "Math.Min(Chunk, data.Length - pos)", "Chunk"),
+    # --- RAR5 container
+    ("RA1", RAR, 'if (len - pos < 5) throw new ArchiveException("Truncated RAR block header.");', ""),
+    ("RA2", RAR, 'if (headerSize == 0 || headerSize > MaxHeaderSize) throw new ArchiveException("RAR header size out of range.");', ""),
+    ("RA3", RAR, 'if (headerEnd > len) throw new ArchiveException("RAR header extends past the archive.");', ""),
+    ("RA4", RAR, "if (Crc32.Compute(span[(int)(pos + 4)..(int)headerEnd]) != crcStored)", "if (false)"),
+    ("RA5", RAR, 'if (extraSize > (ulong)c.Remaining) throw new ArchiveException("RAR extra area larger than its header.");', ""),
+    ("RA6", RAR, 'if (dataSize > (ulong)(len - headerEnd)) throw new ArchiveException("RAR data area extends past the archive.");', ""),
+    ("RA7", RAR, "if ((flags & 0x18) != 0) throw", "if (false) throw"),
+    ("RA8", RAR, 'if (type != 1) throw new ArchiveException("RAR main header missing.");', ""),
+    ("RA9", RAR, 'if (!first) throw new ArchiveException("Duplicate RAR main header.");', ""),
+    ("RA10", RAR, "if (files.Count >= limits.MaxEntries) throw", "if (false) throw"),
+    ("RA11", RAR, 'if (!sawEnd) throw new ArchiveException("RAR end-of-archive block missing.");', ""),
+    ("RA12", RAR, "if ((archiveFlags & 0x01) != 0) throw", "if (false) throw"),
+    ("RA13", RAR, 'if (nameLen > (ulong)c.Remaining) throw new ArchiveException("RAR file name overruns its header.");', ""),
+    ("RA14", RAR, 'if (c.Pos > extraStart) throw new ArchiveException("RAR file name overlaps the extra area.");', ""),
+    ("RA15", RAR, 'if (size == 0 || size > (ulong)extra.Remaining) throw new ArchiveException("Malformed RAR extra record.");', 'if (size == 0) throw new ArchiveException("Malformed RAR extra record.");'),
+    ("RA16", RAR, "case 1: encrypted = true; break;", "case 1: break;"),
+    ("RA17", RAR, "case 5: redirected = true; break;", "case 5: break;"),
+    ("RA18", RAR, "mtime = t ?? mtime;", "mtime = t is null ? mtime : mtime;"),
+    ("RA19", RAR, 'if (f.Encrypted) throw', 'if (false) throw'),
+    ("RA20", RAR, 'if (f.UnknownSize) throw', 'if (false) throw'),
+    ("RA21", RAR, 'if (f.Method != 0) throw', 'if (false) throw'),
+    ("RA22", RAR, 'if (f.Crc32 is null) throw', 'if (false) throw'),
+    ("RA23", RAR, 'if (f.UnpackedSize > (ulong)limits.MaxEntrySize) throw', 'if (false) throw'),
+    ("RA24", RAR, 'if (f.PackedSize != f.UnpackedSize) throw', 'if (false) throw'),
+    ("RA25", RAR, 'if (crc != f.Crc32) throw new ArchiveException("CRC-32 mismatch.");', ""),
+    ("RA26", RAR, 'if (f.UnpackedSize != 0) throw new ArchiveException("Directory entry has data.");', ""),
+    ("RA27", RAR, "if (redirected) return EntryKind.Symlink;", ""),
+    ("RA28", RAR, "if (directory) return EntryKind.Directory;", ""),
+    ("RA29", RAR, "if (host != 1) return EntryKind.File;", ""),
+    ("RA30", RAR, "0xA000 => EntryKind.Symlink,", "0xA000 => EntryKind.File,"),
+    ("RA31", RAR, "0x4000 => EntryKind.Directory,", "0x4000 => EntryKind.File,"),
+    ("RA32", RAR, "_ => EntryKind.Special,", "_ => EntryKind.File,"),
+    ("RA33", RAR, "return ((ulong)f.BlockStart, (ulong)f.DataStart + f.PackedSize);", "return ((ulong)f.DataStart, (ulong)f.DataStart + f.PackedSize);"),
+    ("RA34", RAR, "fileTime <= MaxFileTime ? DateTime.FromFileTimeUtc((long)fileTime).ToLocalTime() : null;", "DateTime.FromFileTimeUtc((long)fileTime).ToLocalTime();"),
+    ("RA35", RAR, 'if (type == 4) throw new ArchiveException("Encrypted RAR headers are not supported.", ArchiveError.Unsupported);', ""),
+    ("RA36", RAR, "case 4:", "case 400:"),
+    ("RA37", RAR, "if ((flags & 4) == 0)", "if (false)"),
+    ("RA38", RAR, 'if (!HasSignature(span)) throw new ArchiveException("Not a RAR 5 archive.");', ""),
+    ("RA39", RAR, "if (f.Kind != EntryKind.File) return;", ""),
     # --- DOS time
     ("D2", DOS, "if (day > DateTime.DaysInMonth(year, month)) return false;", ""),
     ("D3", DOS, "hour > 23", "hour > 24"),

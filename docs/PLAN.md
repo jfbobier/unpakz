@@ -94,3 +94,20 @@ Proofs: bytes written == bytes extracted; temp file always in the final director
 Harness: harness/mutate.py + harness/mutations.py (62 mutants, all killed; run by `./harness.sh full`). Differential vs 7-Zip: archive creation and full-tree extraction.
 Not yet: parallel execution, Windows sink (handle-relative opens to close the check/use window on directories), 8.3 short-name aliases,
 NTFS junction handling verified on Windows, CLI, benchmarks.
+
+## Decisions (2026-11-13, later)
+- Filenames: PathGuard stays the primary, pure, cross-platform gate (testable on Linux). Windows native APIs are a SECOND layer in Unpakz.Windows:
+  after creating each file/dir the OS is asked what it actually resolved (GetFinalPathNameByHandle) and the result must be under the destination;
+  this catches junctions, 8.3 short names and anything PathGuard missed. We do not delegate validation to Path.GetFullPath/Win32 normalisation, because
+  those silently rewrite (collapse `..`, strip trailing dots/spaces), which is exactly the class of attack being defended.
+- Format abstraction: IArchive/ArchiveEntry; planner + executor are format-neutral. ArchiveReader detects RAR5 by signature, else ZIP.
+
+## RAR status
+Done: RAR5 container (all block types parsed, header CRC32 verified, vint, extras: time/redirection/encryption/hash), stored entries, kinds
+(file/dir/symlink via redirection or Unix mode/special), timestamps, solid-flag archives with stored data, limits, hostile-header hardening
+(wrap-around sizes, backward jump loop, oversize headers). Differential vs real rar 7.23 / unrar (stored, solid, symlinks, -p, -hp, -htb, -m3 parse).
+115 mutants (46 new for RAR), all killed.
+Reported Unsupported (explicitly, before any write): compressed methods, encrypted files/headers, BLAKE2-only integrity, multi-volume, unknown size.
+Next: RAR5 decoder (LZ + Huffman, filters delta/E8/E8E9/ARM, solid windows); reference = libarchive's BSD-2 RAR5 reader (fetch, read as data, credit);
+accept only when every `rar -m1..-m5` x dictionary x solid archive matches `unrar` output byte for byte. Then BLAKE2sp, AES-256; then RAR4 (VM filters, PPMd H).
+Also pending: SFX / prefixed archives, multi-volume.

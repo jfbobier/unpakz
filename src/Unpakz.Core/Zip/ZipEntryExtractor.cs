@@ -15,7 +15,6 @@ public static class ZipEntryExtractor
 {
     private const uint LocalSig = 0x04034b50;
     private const int LocalFixed = 30;
-    private const int StoredChunk = 1 << 20;
     private const int InflateBuffer = 128 * 1024;
     private const ulong MaxDeflateRatio = 1032;   // theoretical maximum for DEFLATE (length-258 match in 2 bits)
 
@@ -46,7 +45,7 @@ public static class ZipEntryExtractor
         if (entry.Method == 0)
         {
             if (entry.CompressedSize != entry.UncompressedSize) throw new ArchiveException("Stored entry has mismatched sizes.");
-            crc = CopyStored(data, sink);
+            crc = StoredData.Copy(data, sink);
         }
         else
         {
@@ -78,19 +77,6 @@ public static class ZipEntryExtractor
         if (start > len || entry.CompressedSize > len - start) throw new ArchiveException("Entry data extends past the archive.");
 
         return (start, entry.CompressedSize);
-    }
-
-    private static uint CopyStored(ReadOnlyMemory<byte> data, IOutputSink sink)
-    {
-        uint crc = 0;
-        for (var pos = 0; pos < data.Length; pos += StoredChunk)
-        {
-            var chunk = data.Span.Slice(pos, Math.Min(StoredChunk, data.Length - pos));
-            crc = Crc32.Update(crc, chunk);
-            sink.Write(chunk);   // straight from the archive bytes: no intermediate copy
-        }
-
-        return crc;
     }
 
     private static uint Inflate(ReadOnlyMemory<byte> data, ulong expected, IOutputSink sink)
