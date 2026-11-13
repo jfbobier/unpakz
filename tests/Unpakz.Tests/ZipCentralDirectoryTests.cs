@@ -132,7 +132,7 @@ public class ZipCentralDirectoryTests
     public void Rejects_entry_count_over_configured_limit()
     {
         var zip = new ZipBuilder().Add("a", Hello).Add("b", Hello).Add("c", Hello).Build();
-        Assert.Throws<ArchiveException>(() => ZipCentralDirectory.Read(zip, new ZipLimits { MaxEntries = 2 }));
+        Assert.Throws<ArchiveException>(() => ZipCentralDirectory.Read(zip, new ArchiveLimits { MaxEntries = 2 }));
     }
 
     [Fact]
@@ -215,7 +215,7 @@ public class ZipCentralDirectoryTests
         var e64 = zip.Length - 22 - 20 - 56;
         BinaryPrimitives.WriteUInt64LittleEndian(zip.AsSpan(e64 + 24), (1UL << 31) + 5);   // entries on this disk
         BinaryPrimitives.WriteUInt64LittleEndian(zip.AsSpan(e64 + 32), (1UL << 31) + 5);   // total entries
-        Assert.Throws<ArchiveException>(() => ZipCentralDirectory.Read(zip, new ZipLimits { MaxEntries = long.MaxValue }));
+        Assert.Throws<ArchiveException>(() => ZipCentralDirectory.Read(zip, new ArchiveLimits { MaxEntries = long.MaxValue }));
     }
 
     [Fact]

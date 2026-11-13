@@ -2,11 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using Unpakz.Core;
-using Unpakz.Core.Zip;
 
 namespace Unpakz.Engine;
 
-public sealed record PlannedEntry(int Index, ZipEntryInfo Entry, string RelativePath, bool IsDirectory);
+public sealed record PlannedEntry(ArchiveEntry Entry, string RelativePath, bool IsDirectory);
 
 public sealed record ExtractionPlan(IReadOnlyList<PlannedEntry> Items, IReadOnlyList<SkippedEntry> Skipped, long TotalBytes);
 
@@ -16,11 +15,10 @@ public sealed record ExtractionPlan(IReadOnlyList<PlannedEntry> Items, IReadOnly
 /// </summary>
 public static class ExtractionPlanner
 {
-    private const uint SymlinkType = 0xA000, RegularType = 0x8000, DirectoryType = 0x4000;
-
-    public static ExtractionPlan Plan(ReadOnlyMemory<byte> zip, IReadOnlyList<ZipEntryInfo> entries, string destinationRoot, ExtractOptions options)
+    public static ExtractionPlan Plan(IArchive archive, string destinationRoot, ExtractOptions options)
     {
-        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentNullException.ThrowIfNull(archive);
+        var entries = archive.Entries;
         ArgumentNullException.ThrowIfNull(destinationRoot);
         ArgumentNullException.ThrowIfNull(options);
 
@@ -32,10 +30,9 @@ public static class ExtractionPlanner
         for (var i = 0; i < entries.Count; i++)
         {
             var e = entries[i];
-            var type = e.UnixFileType;
 
-            if (type == SymlinkType) { skipped.Add(new SkippedEntry(e.Name, SkipReason.Symlink)); continue; }
-            if (type is not (0 or RegularType or DirectoryType)) { skipped.Add(new SkippedEntry(e.Name, SkipReason.SpecialFile)); continue; }
+            if (e.Kind == EntryKind.Symlink) { skipped.Add(new SkippedEntry(e.Name, SkipReason.Symlink)); continue; }
+            if (e.Kind == EntryKind.Special) { skipped.Add(new SkippedEntry(e.Name, SkipReason.SpecialFile)); continue; }
 
             var check = PathGuard.Validate(e.Name, options.PathGuard);
             if (!check.IsSafe)
@@ -44,7 +41,7 @@ public static class ExtractionPlanner
                 throw new ArchiveException($"Unsafe entry name '{Printable(e.Name)}': {check.Reason}.", ArchiveError.UnsafePath);
             }
 
-            var isDir = check.IsDirectory || type == DirectoryType;
+            var isDir = check.IsDirectory || e.Kind == EntryKind.Directory;
             var rel = check.RelativePath;
 
             if ((long)destinationRoot.Length + 1 + rel.Length > options.MaxFullPathLength)
@@ -56,9 +53,7 @@ public static class ExtractionPlanner
             }
             else
             {
-                if (e.IsEncrypted) throw new ArchiveException("Encrypted entries are not supported yet.", ArchiveError.Unsupported);
-                if (e.Method is not (0 or 8))
-                    throw new ArchiveException($"Compression method {e.Method} is not supported.", ArchiveError.Unsupported);
+                archive.CheckSupported(e);
 
                 total += (long)Math.Min(e.UncompressedSize, long.MaxValue / 2);
                 if (total > options.MaxTotalSize) throw new ArchiveException("Total extracted size exceeds the limit.", ArchiveError.LimitExceeded);
@@ -68,10 +63,10 @@ public static class ExtractionPlanner
                 throw new ArchiveException($"Entry '{Printable(e.Name)}' collides with another entry.", ArchiveError.Conflict);
             if (duplicateDirectory) continue;
 
-            items.Add(new PlannedEntry(i, e, rel, isDir));
+            items.Add(new PlannedEntry(e, rel, isDir));
         }
 
-        CheckOverlap(zip, items);
+        CheckOverlap(archive, items);
         return new ExtractionPlan(items, skipped, total);
     }
 
@@ -97,14 +92,13 @@ public static class ExtractionPlanner
         return true;
     }
 
-    private static void CheckOverlap(ReadOnlyMemory<byte> zip, List<PlannedEntry> items)
+    private static void CheckOverlap(IArchive archive, List<PlannedEntry> items)
     {
         var ranges = new List<(ulong Start, ulong End)>();
         foreach (var it in items)
         {
             // Header + data: contiguous entries touch exactly; anything that shares bytes with another entry is hostile.
-            var (start, length) = ZipEntryExtractor.LocateRange(zip, it.Entry);
-            ranges.Add((it.Entry.LocalHeaderOffset, start + length));
+            ranges.Add(archive.GetSpan(it.Entry));
         }
 
         ranges.Sort();

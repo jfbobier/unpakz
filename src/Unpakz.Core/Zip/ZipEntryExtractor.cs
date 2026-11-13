@@ -20,9 +20,9 @@ public static class ZipEntryExtractor
     private const ulong MaxDeflateRatio = 1032;   // theoretical maximum for DEFLATE (length-258 match in 2 bits)
 
     public static void Extract(ReadOnlyMemory<byte> zip, ZipEntryInfo entry, IOutputSink sink) =>
-        Extract(zip, entry, sink, new ZipLimits());
+        Extract(zip, entry, sink, new ArchiveLimits());
 
-    public static void Extract(ReadOnlyMemory<byte> zip, ZipEntryInfo entry, IOutputSink sink, ZipLimits limits)
+    public static void Extract(ReadOnlyMemory<byte> zip, ZipEntryInfo entry, IOutputSink sink, ArchiveLimits limits)
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentNullException.ThrowIfNull(sink);

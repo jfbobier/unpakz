@@ -39,7 +39,7 @@ public sealed class LocalFileSystemTests : IDisposable
         var a = Rnd(1000); var b = Txt(200_000); var c = Txt(33);
         var zip = new ZipBuilder().Add("a.bin", a).AddDirectory("d").Add("d/b.txt", b, deflate: true).AddDirectory("empty")
             .Add("d/e/f/c.txt", c, deflate: true).Add("日本/é ü.txt", c).Build();
-        var r = ZipExtractor.Extract(zip, Path.Combine(Dest, "x", "y"));
+        var r = ArchiveExtractor.Extract(zip, Path.Combine(Dest, "x", "y"));
 
         var root = Path.Combine(Dest, "x", "y");
         Assert.Equal(a, File.ReadAllBytes(Path.Combine(root, "a.bin")));
@@ -59,7 +59,7 @@ public sealed class LocalFileSystemTests : IDisposable
         var data = new (string, byte[])[] { ("a", Rnd(5000)), ("d/b", Txt(300_000)), ("d/c", []) };
         var zip = new ZipBuilder().Add("a", data[0].Item2).Add("d/b", data[1].Item2, deflate: true).Add("d/c", []).Build();
         var rec = new RecordingFileSystem(new LocalFileSystem());
-        ZipExtractor.Extract(zip, Dest, null, rec);
+        ArchiveExtractor.Extract(zip, Dest, null, rec);
 
         Assert.Equal(data.Sum(x => (long)x.Item2.Length), rec.BytesWritten);
         Assert.Equal(3, rec.Created.Count);
@@ -77,7 +77,7 @@ public sealed class LocalFileSystemTests : IDisposable
         Directory.CreateSymbolicLink(Path.Combine(Dest, "link"), Outside);
 
         var zip = new ZipBuilder().Add("ok.txt", Rnd(5)).Add("link/pwned.txt", Rnd(5)).Build();
-        var ex = Assert.Throws<ArchiveException>(() => ZipExtractor.Extract(zip, Dest));
+        var ex = Assert.Throws<ArchiveException>(() => ArchiveExtractor.Extract(zip, Dest));
         Assert.Equal(ArchiveError.UnsafePath, ex.Error);
         Assert.Empty(Directory.GetFileSystemEntries(Outside));
         Assert.Empty(Leftovers());
@@ -93,10 +93,10 @@ public sealed class LocalFileSystemTests : IDisposable
         File.CreateSymbolicLink(Path.Combine(Dest, "a.txt"), target);
         var zip = new ZipBuilder().Add("a.txt", "NEW"u8.ToArray()).Build();
 
-        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() => ZipExtractor.Extract(zip, Dest)).Error);
+        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() => ArchiveExtractor.Extract(zip, Dest)).Error);
         Assert.Equal("PRECIOUS", File.ReadAllText(target));
 
-        ZipExtractor.Extract(zip, Dest, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite });
+        ArchiveExtractor.Extract(zip, Dest, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite });
         Assert.Equal("PRECIOUS", File.ReadAllText(target));                       // target untouched
         Assert.Null(new FileInfo(Path.Combine(Dest, "a.txt")).LinkTarget);        // link replaced by a regular file
         Assert.Equal("NEW", File.ReadAllText(Path.Combine(Dest, "a.txt")));
@@ -109,7 +109,7 @@ public sealed class LocalFileSystemTests : IDisposable
         Directory.CreateDirectory(Dest);
         File.CreateSymbolicLink(Path.Combine(Dest, "a.txt"), Path.Combine(Outside, "does-not-exist"));
         var zip = new ZipBuilder().Add("a.txt", "NEW"u8.ToArray()).Build();
-        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() => ZipExtractor.Extract(zip, Dest)).Error);
+        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() => ArchiveExtractor.Extract(zip, Dest)).Error);
         Assert.False(File.Exists(Path.Combine(Outside, "does-not-exist")));
     }
 
@@ -121,15 +121,15 @@ public sealed class LocalFileSystemTests : IDisposable
         var zip = new ZipBuilder().Add("a.txt", "NEW"u8.ToArray()).Add("b.txt", "B"u8.ToArray()).Build();
 
         File.WriteAllText(path, "OLD");
-        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() => ZipExtractor.Extract(zip, Dest)).Error);
+        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() => ArchiveExtractor.Extract(zip, Dest)).Error);
         Assert.Equal("OLD", File.ReadAllText(path));
 
-        var r = ZipExtractor.Extract(zip, Dest, new ExtractOptions { Overwrite = OverwritePolicy.Skip });
+        var r = ArchiveExtractor.Extract(zip, Dest, new ExtractOptions { Overwrite = OverwritePolicy.Skip });
         Assert.Equal("OLD", File.ReadAllText(path));
         Assert.Equal("B", File.ReadAllText(Path.Combine(Dest, "b.txt")));
         Assert.Single(r.Skipped);
 
-        ZipExtractor.Extract(zip, Dest, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite });
+        ArchiveExtractor.Extract(zip, Dest, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite });
         Assert.Equal("NEW", File.ReadAllText(path));
         Assert.Empty(Leftovers());
     }
@@ -140,7 +140,7 @@ public sealed class LocalFileSystemTests : IDisposable
         Directory.CreateDirectory(Path.Combine(Dest, "a.txt"));
         var zip = new ZipBuilder().Add("a.txt", "NEW"u8.ToArray()).Build();
         Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() =>
-            ZipExtractor.Extract(zip, Dest, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite })).Error);
+            ArchiveExtractor.Extract(zip, Dest, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite })).Error);
         Assert.Empty(Leftovers());
     }
 
@@ -148,7 +148,7 @@ public sealed class LocalFileSystemTests : IDisposable
     public void Zip_slip_creates_nothing_anywhere()
     {
         var zip = new ZipBuilder().Add("ok.txt", Rnd(5)).Add("../escaped.txt", Rnd(5)).Add("..\\escaped2.txt", Rnd(5)).Build();
-        Assert.Throws<ArchiveException>(() => ZipExtractor.Extract(zip, Dest));
+        Assert.Throws<ArchiveException>(() => ArchiveExtractor.Extract(zip, Dest));
         Assert.False(Directory.Exists(Dest));
         Assert.DoesNotContain(Directory.GetFileSystemEntries(_work), e => Path.GetFileName(e).StartsWith("escaped", StringComparison.Ordinal));
     }
@@ -160,7 +160,7 @@ public sealed class LocalFileSystemTests : IDisposable
         var cd = (int)BinaryPrimitives.ReadUInt32LittleEndian(zip.AsSpan(zip.Length - 22 + 16));
         var lho = (int)BinaryPrimitives.ReadUInt32LittleEndian(zip.AsSpan(cd + 46 + 3 + 42));
         zip[lho + 30 + 3 + 40] ^= 0xFF;
-        Assert.Throws<ArchiveException>(() => ZipExtractor.Extract(zip, Dest));
+        Assert.Throws<ArchiveException>(() => ArchiveExtractor.Extract(zip, Dest));
         Assert.True(File.Exists(Path.Combine(Dest, "one")));
         Assert.False(File.Exists(Path.Combine(Dest, "two")));
         Assert.Empty(Leftovers());
@@ -172,7 +172,7 @@ public sealed class LocalFileSystemTests : IDisposable
         var big = Rnd(48 << 20, 7);
         var txt = Txt(64 << 20);
         var zip = new ZipBuilder().Add("big.bin", big).Add("big.txt", txt, deflate: true).Build();
-        ZipExtractor.Extract(zip, Dest);
+        ArchiveExtractor.Extract(zip, Dest);
         Assert.Equal(SHA256.HashData(big), SHA256.HashData(File.ReadAllBytes(Path.Combine(Dest, "big.bin"))));
         Assert.Equal(SHA256.HashData(txt), SHA256.HashData(File.ReadAllBytes(Path.Combine(Dest, "big.txt"))));
     }

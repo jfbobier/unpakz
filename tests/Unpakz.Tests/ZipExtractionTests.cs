@@ -129,7 +129,7 @@ public class ZipExtractionTests
         var zip = new ZipBuilder().Add("f", new byte[10_000], deflate: true).Build();
         var entry = ZipCentralDirectory.Read(zip)[0];
         var ex = Assert.Throws<ArchiveException>(() =>
-            ZipEntryExtractor.Extract(zip, entry, new MemorySink(), new ZipLimits { MaxEntrySize = 9_999 }));
+            ZipEntryExtractor.Extract(zip, entry, new MemorySink(), new ArchiveLimits { MaxEntrySize = 9_999 }));
         Assert.Equal(ArchiveError.LimitExceeded, ex.Error);
     }
 
@@ -222,7 +222,7 @@ public class ZipExtractionTests
         try
         {
             foreach (var e in ZipCentralDirectory.Read(copy))
-                ZipEntryExtractor.Extract(copy, e, new MemorySink(), new ZipLimits { MaxEntrySize = 1 << 20 });
+                ZipEntryExtractor.Extract(copy, e, new MemorySink(), new ArchiveLimits { MaxEntrySize = 1 << 20 });
         }
         catch (ArchiveException) { /* the only allowed failure */ }
     }

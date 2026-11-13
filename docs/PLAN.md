@@ -84,7 +84,7 @@ Known gaps / next: engine pipeline (real file sink, PathGuard integration, case-
 CLI, I/O proofs (single write, no temp dir), SFX-prefixed archives, Unicode path extra (0x7075), AES, Deflate64, hardware CRC (needs benchmark first).
 
 ## M1 status update: engine pipeline + security suite
-Done: ExtractionPlanner (pure, I/O-free, refuses before any write), ZipExtractor (plan -> create dest -> per-file link check -> decode into same-dir
+Done: ExtractionPlanner (pure, I/O-free, refuses before any write), ArchiveExtractor (plan -> create dest -> per-file link check -> decode into same-dir
 temp file -> verify size+CRC -> rename), IFileSystem with LocalFileSystem + test InMemoryFileSystem (operation log), DosTime, cancellation, progress.
 Security rules enforced and tested: traversal/rooted/UNC/drive-relative, reserved device names, ADS, trailing dot/space, case-insensitive duplicates,
 file/dir collisions, symlink + special entries skipped (never created), pre-existing symlink/junction in destination path refused, symlink at final

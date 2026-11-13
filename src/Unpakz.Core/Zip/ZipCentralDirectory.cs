@@ -16,9 +16,9 @@ public static class ZipCentralDirectory
     private const int EocdSize = 22, Eocd64Size = 56, Loc64Size = 20, CentralFixed = 46, LocalFixed = 30;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
-    public static IReadOnlyList<ZipEntryInfo> Read(ReadOnlySpan<byte> zip) => Read(zip, new ZipLimits());
+    public static IReadOnlyList<ZipEntryInfo> Read(ReadOnlySpan<byte> zip) => Read(zip, new ArchiveLimits());
 
-    public static IReadOnlyList<ZipEntryInfo> Read(ReadOnlySpan<byte> zip, ZipLimits limits)
+    public static IReadOnlyList<ZipEntryInfo> Read(ReadOnlySpan<byte> zip, ArchiveLimits limits)
     {
         ArgumentNullException.ThrowIfNull(limits);
         var (count, cdOffset, cdSize) = LocateDirectory(zip);

@@ -32,7 +32,7 @@ public class DifferentialExtractionTests
             Assert.True(Oracle.Run(sz, ["x", "-y", $"-o{theirs}", zipPath], work, out var log2) == 0, log2);
 
             var ours = Path.Combine(work, "ours");
-            var result = ZipExtractor.Extract(File.ReadAllBytes(zipPath), ours);
+            var result = ArchiveExtractor.Extract(File.ReadAllBytes(zipPath), ours);
 
             var a = Snapshot(ours);
             var b = Snapshot(theirs);

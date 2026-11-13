@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mutation harness: break guarded code on purpose, require the test suite to notice.
 
-Usage: python3 harness/mutate.py [filter-substring | =ID1,ID2,...]
+Usage: python3 harness/mutate.py [filter-substring | =ID1,ID2,... | --check]
 Each mutant must (a) apply exactly once, (b) compile, (c) make the suite fail. Survivors fail the run unless listed
 in EQUIVALENT with a reason. Source files are always restored (also on Ctrl-C / SIGTERM).
 """
@@ -29,6 +29,15 @@ def run_tests():
     return p.returncode, compile_error
 
 flt = sys.argv[1] if len(sys.argv) > 1 else ""
+if flt == "--check":   # fast: only verify every mutation still applies exactly once
+    stale = 0
+    for mid, rel, find, _ in MUTANTS:
+        with open(os.path.join(ROOT, rel), encoding="utf-8", newline="") as f:
+            n = f.read().count(find)
+        if n != 1:
+            stale += 1; print(f"{mid:6} STALE ({n} matches) in {rel}")
+    print(f"{len(MUTANTS)} mutants, {stale} stale")
+    sys.exit(1 if stale else 0)
 results = {"killed": 0, "survived": [], "invalid": [], "stale": []}
 if flt.startswith("="):
     wanted = set(flt[1:].split(","))

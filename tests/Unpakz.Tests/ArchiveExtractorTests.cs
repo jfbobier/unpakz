@@ -6,7 +6,7 @@ using Unpakz.Tests.Support;
 
 namespace Unpakz.Tests;
 
-public class ZipExtractorTests
+public class ArchiveExtractorTests
 {
     private static readonly string Dest = Path.GetFullPath(Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "dest"));
     private static string P(string rel) => Path.Combine(Dest, rel.Replace('/', Path.DirectorySeparatorChar));
@@ -28,7 +28,7 @@ public class ZipExtractorTests
     }
 
     private static ExtractionResult Run(byte[] zip, InMemoryFileSystem fs, ExtractOptions? o = null, IProgress<ExtractionProgress>? pr = null, CancellationToken ct = default) =>
-        ZipExtractor.Extract(zip, Dest, o, fs, pr, ct);
+        ArchiveExtractor.Extract(zip, Dest, o, fs, pr, ct);
 
     // ---- happy path ----
     [Fact]
@@ -136,14 +136,14 @@ public class ZipExtractorTests
     [Fact]
     public void Resolve_under_root_rejects_escapes_as_defence_in_depth()
     {
-        Assert.Equal(P("a/b"), ZipExtractor.ResolveUnderRoot(Dest, "a/b"));
-        Assert.Throws<ArchiveException>(() => ZipExtractor.ResolveUnderRoot(Dest, "../x"));
-        Assert.Throws<ArchiveException>(() => ZipExtractor.ResolveUnderRoot(Dest, "a/../../x"));
-        Assert.Throws<ArchiveException>(() => ZipExtractor.ResolveUnderRoot(Dest, ".."));
-        Assert.Throws<ArchiveException>(() => ZipExtractor.ResolveUnderRoot(Dest, ""));
-        Assert.Throws<ArchiveException>(() => ZipExtractor.ResolveUnderRoot(Dest, "."));
-        Assert.Throws<ArchiveException>(() => ZipExtractor.ResolveUnderRoot(Dest, "/abs"));
-        Assert.Throws<ArchiveException>(() => ZipExtractor.ResolveUnderRoot(Dest, "../" + Path.GetFileName(Dest) + "x/y"));   // sibling with same prefix
+        Assert.Equal(P("a/b"), ArchiveExtractor.ResolveUnderRoot(Dest, "a/b"));
+        Assert.Throws<ArchiveException>(() => ArchiveExtractor.ResolveUnderRoot(Dest, "../x"));
+        Assert.Throws<ArchiveException>(() => ArchiveExtractor.ResolveUnderRoot(Dest, "a/../../x"));
+        Assert.Throws<ArchiveException>(() => ArchiveExtractor.ResolveUnderRoot(Dest, ".."));
+        Assert.Throws<ArchiveException>(() => ArchiveExtractor.ResolveUnderRoot(Dest, ""));
+        Assert.Throws<ArchiveException>(() => ArchiveExtractor.ResolveUnderRoot(Dest, "."));
+        Assert.Throws<ArchiveException>(() => ArchiveExtractor.ResolveUnderRoot(Dest, "/abs"));
+        Assert.Throws<ArchiveException>(() => ArchiveExtractor.ResolveUnderRoot(Dest, "../" + Path.GetFileName(Dest) + "x/y"));   // sibling with same prefix
     }
 
     // ---- existing content policies ----
@@ -261,7 +261,7 @@ public class ZipExtractorTests
     {
         var deep = Path.Combine(Dest, "x", "y", "z");
         var fs = new InMemoryFileSystem(Dest);
-        ZipExtractor.Extract(new ZipBuilder().Add("f", Rnd(3)).Build(), deep, null, fs);
+        ArchiveExtractor.Extract(new ZipBuilder().Add("f", Rnd(3)).Build(), deep, null, fs);
         Assert.True(fs.Files.ContainsKey(Path.Combine(deep, "f")));
     }
 
@@ -342,7 +342,7 @@ public class ZipExtractorTests
     private static void Try(byte[] zip)
     {
         var fs = new InMemoryFileSystem(Dest);
-        try { Run(zip, fs, new ExtractOptions { Limits = new ZipLimits { MaxEntrySize = 1 << 20 } }); }
+        try { Run(zip, fs, new ExtractOptions { Limits = new ArchiveLimits { MaxEntrySize = 1 << 20 } }); }
         catch (ArchiveException) { }
         Assert.Empty(fs.LeftoverTemps());                              // invariant: failure never leaves temp files
         Assert.All(fs.Files.Keys, k => Assert.StartsWith(Dest, k, StringComparison.Ordinal));   // nothing outside the destination

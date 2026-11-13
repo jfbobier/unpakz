@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using Unpakz.Core.Zip;
+using Unpakz.Core;
 
 namespace Unpakz.Engine;
 
@@ -26,7 +26,7 @@ public sealed record SkippedEntry(string Name, SkipReason Reason);
 public sealed class ExtractOptions
 {
     public PathGuardOptions PathGuard { get; init; } = new();
-    public ZipLimits Limits { get; init; } = new();
+    public ArchiveLimits Limits { get; init; } = new();
     public OverwritePolicy Overwrite { get; init; } = OverwritePolicy.Fail;
 
     /// <summary>If false (default) any unsafe entry name aborts the whole extraction before anything is written.</summary>

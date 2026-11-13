@@ -4,9 +4,10 @@ ZCD = "src/Unpakz.Core/Zip/ZipCentralDirectory.cs"
 ZEE = "src/Unpakz.Core/Zip/ZipEntryExtractor.cs"
 CRC = "src/Unpakz.Core/Checksums/Crc32.cs"
 PLN = "src/Unpakz.Engine/ExtractionPlanner.cs"
-EXT = "src/Unpakz.Engine/ZipExtractor.cs"
+EXT = "src/Unpakz.Engine/ArchiveExtractor.cs"
 LFS = "src/Unpakz.Engine/LocalFileSystem.cs"
 DOS = "src/Unpakz.Core/Zip/DosTime.cs"
+ZAR = "src/Unpakz.Core/Zip/ZipArchive.cs"
 
 MUTANTS = [
     # --- PathGuard
@@ -43,13 +44,19 @@ MUTANTS = [
     ("C1", CRC, "^ t[(int)(hi >> 24)];", ";"),
     ("C2", CRC, "for (; i < data.Length; i++)", "for (; i < data.Length - 1; i++)"),
     # --- planner
-    ("L1", PLN, "if (type == SymlinkType) { skipped.Add(new SkippedEntry(e.Name, SkipReason.Symlink)); continue; }", ""),
-    ("L2", PLN, "if (type is not (0 or RegularType or DirectoryType)) { skipped.Add(new SkippedEntry(e.Name, SkipReason.SpecialFile)); continue; }", ""),
+    ("L1", PLN, "if (e.Kind == EntryKind.Symlink) { skipped.Add(new SkippedEntry(e.Name, SkipReason.Symlink)); continue; }", ""),
+    ("L2", PLN, "if (e.Kind == EntryKind.Special) { skipped.Add(new SkippedEntry(e.Name, SkipReason.SpecialFile)); continue; }", ""),
     ("L3", PLN, "if (options.SkipUnsafePaths) {", "if (true) {"),
     ("L4", PLN, "if ((long)destinationRoot.Length + 1 + rel.Length > options.MaxFullPathLength)", "if (false)"),
     ("L5", PLN, 'if (e.UncompressedSize != 0 || e.CompressedSize != 0) throw new ArchiveException("Directory entry has data.");', ""),
-    ("L6", PLN, 'if (e.IsEncrypted) throw new ArchiveException("Encrypted entries are not supported yet.", ArchiveError.Unsupported);', ""),
-    ("L7", PLN, "if (e.Method is not (0 or 8))", "if (false)"),
+    ("L6", ZAR, 'if (z.IsEncrypted) throw new ArchiveException("Encrypted entries are not supported yet.", ArchiveError.Unsupported);', ""),
+    ("L7", ZAR, "if (z.Method is not (0 or 8))", "if (false)"),
+    ("L16", PLN, "archive.CheckSupported(e);", ""),
+    ("ZA1", ZAR, "if (type == SymlinkType) return EntryKind.Symlink;", ""),
+    ("ZA2", ZAR, "if (type is not (0 or RegularType or DirectoryType)) return EntryKind.Special;", ""),
+    ("ZA3", ZAR, "return z.IsDirectory || type == DirectoryType ? EntryKind.Directory : EntryKind.File;", "return z.IsDirectory ? EntryKind.Directory : EntryKind.File;"),
+    ("ZA4", ZAR, "return (z.LocalHeaderOffset, start + length);", "return (start, start + length);"),
+    ("ZA5", ZAR, "DosTime.TryConvert(z.DosDateTime, out var t) ? t : null", "null"),
     ("L8", PLN, "if (total > options.MaxTotalSize)", "if (false)"),
     ("L9", PLN, "var kinds = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);", "var kinds = new Dictionary<string, bool>(StringComparer.Ordinal);"),
     ("L10", PLN, "if (kinds.TryGetValue(prefix, out var prefixIsDir)) { if (!prefixIsDir) return false; }", "if (kinds.TryGetValue(prefix, out var prefixIsDir)) { }"),
@@ -67,7 +74,7 @@ MUTANTS = [
     ("X8", EXT, "writer.Commit(mtime, options.Overwrite == OverwritePolicy.Overwrite);", "writer.Commit(mtime, true);"),
     ("X9", EXT, "ct.ThrowIfCancellationRequested();\n            writer.Write(data);", "_ = ct;\n            writer.Write(data);"),
     ("X10", EXT, "cancellationToken.ThrowIfCancellationRequested();\n            var full", "var full"),
-    ("X11", EXT, "DateTime? mtime = options.RestoreTimestamps && DosTime.TryConvert(entry.DosDateTime, out var t) ? t : null;", "DateTime? mtime = null;"),
+    ("X11", EXT, "DateTime? mtime = options.RestoreTimestamps ? entry.LastWriteLocal : null;", "DateTime? mtime = null;"),
     ("X12", EXT, "var prealloc = declared <= options.PreallocateLimit ? declared : 0;", "var prealloc = declared;"),
     ("X13", EXT, 'if (kind == PathKind.File) throw new ArchiveException("Destination is a file.", ArchiveError.Conflict);', ""),
     ("X14", EXT, "case PathKind.File:", "case (PathKind)97:"),

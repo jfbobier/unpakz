@@ -12,7 +12,7 @@ public class ExtractionPlannerTests
     private static readonly string Root = Path.GetFullPath(Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "dest"));
 
     private static ExtractionPlan Plan(byte[] zip, ExtractOptions? o = null) =>
-        ExtractionPlanner.Plan(zip, ZipCentralDirectory.Read(zip), Root, o ?? new ExtractOptions());
+        ExtractionPlanner.Plan(ZipArchive.Open(zip), Root, o ?? new ExtractOptions());
 
     private static ArchiveError PlanError(byte[] zip, ExtractOptions? o = null) =>
         Assert.Throws<ArchiveException>(() => Plan(zip, o)).Error;

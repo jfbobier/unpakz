@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using Unpakz.Core;
-using Unpakz.Core.Zip;
 
 namespace Unpakz.Engine;
 
@@ -12,24 +11,38 @@ namespace Unpakz.Engine;
 /// (2) create the destination, (3) per file: verify no link in the path, decode straight into a same-directory temp
 /// file, verify size + CRC, rename. A failed file never survives; completed files stay.
 /// </summary>
-public static class ZipExtractor
+public static class ArchiveExtractor
 {
+    /// <summary>Detects the format (ZIP, RAR) and extracts.</summary>
     public static ExtractionResult Extract(
-        ReadOnlyMemory<byte> zip,
+        ReadOnlyMemory<byte> data,
         string destination,
         ExtractOptions? options = null,
         IFileSystem? fileSystem = null,
         IProgress<ExtractionProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        var archive = ArchiveReader.Open(data, (options ?? new ExtractOptions()).Limits);
+        return Extract(archive, destination, options, fileSystem, progress, cancellationToken);
+    }
+
+    public static ExtractionResult Extract(
+        IArchive archive,
+        string destination,
+        ExtractOptions? options = null,
+        IFileSystem? fileSystem = null,
+        IProgress<ExtractionProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(archive);
         ArgumentException.ThrowIfNullOrEmpty(destination);
         options ??= new ExtractOptions();
         var fs = fileSystem ?? new LocalFileSystem();
 
         cancellationToken.ThrowIfCancellationRequested();
-        var entries = ZipCentralDirectory.Read(zip.Span, options.Limits);
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
-        var plan = ExtractionPlanner.Plan(zip, entries, root, options);
+        var plan = ExtractionPlanner.Plan(archive, root, options);
 
         EnsureRoot(fs, root);
         var verified = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { root };
@@ -71,22 +84,22 @@ public static class ZipExtractor
                     break;
             }
 
-            ExtractFile(zip, item.Entry, full, fs, options, state, cancellationToken);
+            ExtractFile(archive, item.Entry, full, fs, options, state, cancellationToken);
         }
 
         return new ExtractionResult(state.FilesCompleted, dirs, state.BytesWritten, skipped);
     }
 
-    private static void ExtractFile(ReadOnlyMemory<byte> zip, ZipEntryInfo entry, string full, IFileSystem fs,
+    private static void ExtractFile(IArchive archive, ArchiveEntry entry, string full, IFileSystem fs,
         ExtractOptions options, State state, CancellationToken ct)
     {
         var declared = (long)Math.Min(entry.UncompressedSize, long.MaxValue);
         var prealloc = declared <= options.PreallocateLimit ? declared : 0;
 
         using var writer = fs.CreateFile(full, prealloc);
-        ZipEntryExtractor.Extract(zip, entry, new TrackingSink(writer, state, ct), options.Limits);
+        archive.Extract(entry, new TrackingSink(writer, state, ct), options.Limits);
 
-        DateTime? mtime = options.RestoreTimestamps && DosTime.TryConvert(entry.DosDateTime, out var t) ? t : null;
+        DateTime? mtime = options.RestoreTimestamps ? entry.LastWriteLocal : null;
         writer.Commit(mtime, options.Overwrite == OverwritePolicy.Overwrite);
 
         state.FilesCompleted++;
