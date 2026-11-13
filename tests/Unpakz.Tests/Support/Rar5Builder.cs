@@ -6,6 +6,8 @@ namespace Unpakz.Tests.Support;
 internal sealed class FileOpts
 {
     public int Method { get; init; }
+    public int CompressionVersion { get; init; }
+    public int DictionaryLog { get; init; }
     public bool OmitCrc { get; init; }
     public uint? CrcOverride { get; init; }
     public ulong Host { get; init; } = 1;                 // 0 = Windows, 1 = Unix
@@ -84,7 +86,7 @@ internal sealed class Rar5Builder
     {
         ulong fflags = (isDir ? 1UL : 0) | (o.Mtime is not null ? 2UL : 0) | (o.OmitCrc ? 0UL : 4UL) | (o.UnknownSize ? 8UL : 0);
         var crc = o.CrcOverride ?? ZipBuilder.Crc32(data);
-        var comp = ((ulong)o.Method << 7) | (o.Solid ? 1UL << 6 : 0);
+        var comp = ((ulong)o.Method << 7) | (o.Solid ? 1UL << 6 : 0) | (uint)o.CompressionVersion | ((ulong)(uint)o.DictionaryLog << 10);
 
         var spec = new List<byte>();
         spec.AddRange(VInt(fflags));

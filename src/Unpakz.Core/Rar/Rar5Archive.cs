@@ -21,6 +21,14 @@ public sealed class Rar5Archive : IArchive
 
     private readonly ReadOnlyMemory<byte> _data;
     private readonly List<RarFile> _files;
+    private readonly List<List<int>> _groups;
+    private readonly object _decoderLock = new();
+
+    internal DecoderStats Stats { get; } = new();
+
+    private Rar5Decoder? _decoder;
+    private int _decoderGroup = -1;
+    private int _decoderNext;
 
     public string Format => "rar5";
 
@@ -28,7 +36,31 @@ public sealed class Rar5Archive : IArchive
 
     private sealed record RarFile(
         string Name, EntryKind Kind, ulong PackedSize, ulong UnpackedSize, uint? Crc32, bool UnknownSize, bool Encrypted,
-        int Method, long BlockStart, long DataStart, DateTime? LastWrite);
+        int Method, long BlockStart, long DataStart, DateTime? LastWrite,
+        bool Solid, int DictLog, int Version, int Group, int GroupIndex);
+
+    /// <summary>Chains compressed files into solid groups (a non-solid file starts a new group); stored files and non-files take no part.</summary>
+    private static List<List<int>> AssignGroups(List<RarFile> files)
+    {
+        var groups = new List<List<int>>();
+        List<int>? current = null;
+        for (var i = 0; i < files.Count; i++)
+        {
+            var f = files[i];
+            if (f.Kind != EntryKind.File || f.Method == 0) continue;
+
+            if (current is null || !f.Solid)
+            {
+                current = [];
+                groups.Add(current);
+            }
+
+            files[i] = f with { Group = groups.Count - 1, GroupIndex = current.Count };
+            current.Add(i);
+        }
+
+        return groups;
+    }
 
     public static bool HasSignature(ReadOnlySpan<byte> data) => data.StartsWith(Signature);
 
@@ -38,6 +70,7 @@ public sealed class Rar5Archive : IArchive
     {
         _data = data;
         _files = files;
+        _groups = AssignGroups(files);
         var list = new List<ArchiveEntry>(files.Count);
         for (var i = 0; i < files.Count; i++)
         {
@@ -177,7 +210,8 @@ public sealed class Rar5Archive : IArchive
         var directory = (fileFlags & 0x01) != 0;
         var unknownSize = (fileFlags & 0x08) != 0;
         return new RarFile(name, KindOf(redirected, directory, host, attributes), packedSize, unknownSize ? packedSize : unpacked, crc,
-            unknownSize, encrypted, (int)((compInfo >> 7) & 7), blockStart, dataStart, mtime);
+            unknownSize, encrypted, (int)((compInfo >> 7) & 7), blockStart, dataStart, mtime,
+            (compInfo & 0x40) != 0, (int)((compInfo >> 10) & 0xF), (int)(compInfo & 0x3F), -1, 0);
     }
 
     private static EntryKind KindOf(bool redirected, bool directory, ulong host, ulong attributes)
@@ -206,7 +240,9 @@ public sealed class Rar5Archive : IArchive
         if (f.Kind != EntryKind.File) return;
         if (f.Encrypted) throw new ArchiveException("Encrypted RAR entries are not supported yet.", ArchiveError.Unsupported);
         if (f.UnknownSize) throw new ArchiveException("RAR entries of unknown size are not supported.", ArchiveError.Unsupported);
-        if (f.Method != 0) throw new ArchiveException($"RAR compression method {f.Method} is not implemented yet.", ArchiveError.Unsupported);
+        if (f.Method > 5) throw new ArchiveException($"RAR compression method {f.Method} is not supported.", ArchiveError.Unsupported);
+        if (f.Method != 0 && f.Version != 0)
+            throw new ArchiveException($"RAR compression version {f.Version} is not supported.", ArchiveError.Unsupported);
         if (f.Crc32 is null) throw new ArchiveException("RAR entry has no CRC-32 (BLAKE2 integrity is not implemented yet).", ArchiveError.Unsupported);
     }
 
@@ -230,10 +266,96 @@ public sealed class Rar5Archive : IArchive
 
         CheckSupported(entry);
         if (f.UnpackedSize > (ulong)limits.MaxEntrySize) throw new ArchiveException("Entry exceeds the configured size limit.", ArchiveError.LimitExceeded);
-        if (f.PackedSize != f.UnpackedSize) throw new ArchiveException("Stored entry has mismatched sizes.");
 
-        var crc = StoredData.Copy(_data.Slice((int)f.DataStart, (int)f.PackedSize), sink);
-        if (crc != f.Crc32) throw new ArchiveException("CRC-32 mismatch.");
+        if (f.Method == 0)
+        {
+            if (f.PackedSize != f.UnpackedSize) throw new ArchiveException("Stored entry has mismatched sizes.");
+
+            var crc = StoredData.Copy(_data.Slice((int)f.DataStart, (int)f.PackedSize), sink);
+            if (crc != f.Crc32) throw new ArchiveException("CRC-32 mismatch.");
+            return;
+        }
+
+        ExtractCompressed(f, sink, limits);
+    }
+
+    private void ExtractCompressed(RarFile f, IOutputSink sink, ArchiveLimits limits)
+    {
+        var members = _groups[f.Group];
+        var dictLog = 0;
+        ulong total = 0;
+        foreach (var idx in members)
+        {
+            dictLog = Math.Max(dictLog, _files[idx].DictLog);
+            total += _files[idx].UnpackedSize;
+        }
+
+        var dictionary = Rar5Decoder.DictionarySize(dictLog);
+        var windowLimit = Math.Min(dictionary, NextPowerOfTwo(total));
+        if (windowLimit > limits.MaxDictionarySize)
+            throw new ArchiveException("The RAR dictionary exceeds the configured memory limit.", ArchiveError.LimitExceeded);
+
+        var verify = new CrcSink(sink);
+        lock (_decoderLock)
+        {
+            try
+            {
+                if (_decoder is null || _decoderGroup != f.Group || _decoderNext > f.GroupIndex)
+                {
+                    _decoder = new Rar5Decoder(dictionary, windowLimit, Stats);
+                    _decoderGroup = f.Group;
+                    _decoderNext = 0;
+                }
+
+                while (_decoderNext < f.GroupIndex)
+                {
+                    var earlier = _files[members[_decoderNext]];
+                    CheckSupported(Entries[members[_decoderNext]]);
+                    _decoder.Decode(PackedFor(earlier), earlier.UnpackedSize, solid: _decoderNext > 0, NullSink.Instance);
+                    _decoderNext++;
+                }
+
+                _decoder.Decode(PackedFor(f), f.UnpackedSize, solid: f.GroupIndex > 0, verify);
+                _decoderNext = f.GroupIndex + 1;
+            }
+            catch
+            {
+                _decoder = null;      // a failed decode leaves the shared window in an unknown state
+                _decoderGroup = -1;
+                throw;
+            }
+        }
+
+        if (verify.Crc != f.Crc32) throw new ArchiveException("CRC-32 mismatch.");
+    }
+
+    private PackedStream PackedFor(RarFile f) => new(_data.Slice((int)f.DataStart, (int)f.PackedSize));
+
+    private static long NextPowerOfTwo(ulong value)
+    {
+        var size = 1L << 16;
+        while ((ulong)size < value && size < (1L << 40)) size <<= 1;
+        return size;
+    }
+
+    private sealed class CrcSink(IOutputSink inner) : IOutputSink
+    {
+        public uint Crc { get; private set; }
+
+        public void Write(ReadOnlySpan<byte> data)
+        {
+            Crc = Crc32.Update(Crc, data);
+            inner.Write(data);
+        }
+    }
+
+    private sealed class NullSink : IOutputSink
+    {
+        public static readonly NullSink Instance = new();
+
+        public void Write(ReadOnlySpan<byte> data)
+        {
+        }
     }
 
     /// <summary>Bounds-checked forward reader over a header; any overrun is a Corrupt archive.</summary>

@@ -103,7 +103,7 @@ public sealed class RarOracleTests : IDisposable
     }
 
     [Fact]
-    public void Compressed_archives_parse_fully_but_extraction_is_unsupported_for_now()
+    public void Compressed_archives_list_and_extract()
     {
         if (!Oracle.TryGetRar(out var rar, out _)) return;
         var src = Path.Combine(_work, "src");
@@ -117,9 +117,11 @@ public sealed class RarOracleTests : IDisposable
         Assert.Equal(5000UL, a.Entries.Single(e => e.Name == "a.txt").UncompressedSize);
         Assert.True(a.Entries.Single(e => e.Name == "a.txt").CompressedSize < 5000);
 
-        var ex = Assert.Throws<ArchiveException>(() => ArchiveExtractor.Extract(File.ReadAllBytes(archive), Path.Combine(_work, "ours")));
-        Assert.Equal(ArchiveError.Unsupported, ex.Error);
-        Assert.False(Directory.Exists(Path.Combine(_work, "ours")));      // refused before touching the disk
+        var ours = Path.Combine(_work, "ours");
+        var r = ArchiveExtractor.Extract(File.ReadAllBytes(archive), ours);
+        Assert.Equal(2, r.Files);
+        Assert.Equal(new string('x', 5000), File.ReadAllText(Path.Combine(ours, "a.txt")));
+        Assert.Equal("hello hello hello hello", File.ReadAllText(Path.Combine(ours, "sub", "b.txt")));
     }
 
     [Fact]

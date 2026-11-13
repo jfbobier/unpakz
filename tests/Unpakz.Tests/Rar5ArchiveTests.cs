@@ -132,12 +132,29 @@ public class Rar5ArchiveTests
     }
 
     // ---- unsupported (honestly reported, never mis-extracted) ----
-    [Fact]
-    public void Compressed_methods_are_reported_unsupported_until_the_decoder_exists()
+    [Theory]
+    [InlineData(6)]
+    [InlineData(7)]
+    public void Reserved_compression_methods_are_unsupported(int method)
     {
-        var a = Open(new Rar5Builder().AddFile("c", [1, 2, 3], new FileOpts { Method = 3 }).Build());
+        var a = Open(new Rar5Builder().AddFile("c", [1, 2, 3], new FileOpts { Method = method }).Build());
         Assert.Equal(ArchiveError.Unsupported, Assert.Throws<ArchiveException>(() => a.CheckSupported(a.Entries[0])).Error);
         Assert.Equal(ArchiveError.Unsupported, Assert.Throws<ArchiveException>(() => a.Extract(a.Entries[0], new MemorySink(), new ArchiveLimits())).Error);
+    }
+
+    [Fact]
+    public void Garbage_in_a_compressed_entry_is_corrupt_not_unsupported()
+    {
+        var a = Open(new Rar5Builder().AddFile("c", [1, 2, 3, 4, 5, 6, 7, 8], new FileOpts { Method = 3, UnpackedOverride = 100 }).Build());
+        a.CheckSupported(a.Entries[0]);
+        Assert.Equal(ArchiveError.Corrupt, Assert.Throws<ArchiveException>(() => a.Extract(a.Entries[0], new MemorySink(), new ArchiveLimits())).Error);
+    }
+
+    [Fact]
+    public void Newer_compression_versions_are_unsupported()
+    {
+        var a = Open(new Rar5Builder().AddFile("c", [1, 2, 3], new FileOpts { Method = 3, CompressionVersion = 1 }).Build());
+        Assert.Equal(ArchiveError.Unsupported, Assert.Throws<ArchiveException>(() => a.CheckSupported(a.Entries[0])).Error);
     }
 
     [Fact]
@@ -488,7 +505,7 @@ public class Rar5ArchiveTests
     [Fact]
     public void Pipeline_rejects_unsupported_entry_before_writing_anything()
     {
-        var rar = new Rar5Builder().AddFile("ok", [1]).AddFile("compressed", [1, 2], new FileOpts { Method = 3 }).Build();
+        var rar = new Rar5Builder().AddFile("ok", [1]).AddFile("exotic", [1, 2], new FileOpts { Method = 6 }).Build();
         var fs = new InMemoryFileSystem(Dest);
         Assert.Equal(ArchiveError.Unsupported, Assert.Throws<ArchiveException>(() => ArchiveExtractor.Extract(rar, Dest, null, fs)).Error);
         Assert.Empty(fs.Files);
