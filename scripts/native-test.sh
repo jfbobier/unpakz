@@ -9,4 +9,4 @@ if [ ! -f $B/CMakeCache.txt ]; then
 fi
 if ! cmake --build $B -j"$(nproc)" </dev/null 2>&1 | tail -40 | tee $B.build.log | grep -q "error"; then :; fi
 if grep -q "error" $B.build.log; then cat $B.build.log; echo NATIVE-BUILD-ERROR; exit 1; fi
-if ctest --test-dir $B --output-on-failure --timeout 600 </dev/null; then echo NATIVE-PASS; else echo NATIVE-FAIL; exit 1; fi
+if ctest --test-dir $B --output-on-failure --timeout 600 ${UNPAKZ_CTEST_FILTER:+-R "$UNPAKZ_CTEST_FILTER"} </dev/null; then echo NATIVE-PASS; else echo NATIVE-FAIL; exit 1; fi

@@ -66,11 +66,12 @@ add_executable(engine_test tests/engine_test.cpp)
 target_link_libraries(engine_test PRIVATE unpakz_core)
 add_test(NAME engine_test COMMAND engine_test)
 
-foreach(t api_test volumes_test)
+foreach(t api_test volumes_test rar5_test)
   add_executable(${t} tests/${t}.cpp)
   target_link_libraries(${t} PRIVATE unpakz_core)
   add_test(NAME ${t} COMMAND ${t})
 endforeach()
+target_compile_definitions(rar5_test PRIVATE UNPAKZ_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/../tests/Unpakz.Tests/Fixtures")
 
 # The shipped library: C API only, static CRT so users need no redistributable.
 add_library(unpakz SHARED ${UNPAKZ_SOURCES})

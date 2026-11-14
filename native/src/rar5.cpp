@@ -2,10 +2,15 @@
 
 #include <zlib.h>
 
+extern "C" {
+#include "archive_blake2.h"   // libarchive's BLAKE2sp (RAR 5 can use it instead of CRC-32); linked from the vendored static library
+}
+
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <deque>
+#include <optional>
 
 #include "guard.h"
 #include "platform.h"
@@ -148,6 +153,7 @@ struct FileInfo {
     EntryKind kind = EntryKind::File;
     std::uint64_t packed = 0, unpacked = 0;
     std::optional<std::uint32_t> crc;
+    std::optional<std::array<std::uint8_t, 32>> blake2;
     bool unknown_size = false, encrypted = false;
     int method = 0;
     std::vector<Segment> segments;
@@ -163,6 +169,7 @@ struct FilePart {
     std::uint64_t unpacked;
     bool unknown_size;
     std::optional<std::uint32_t> crc;
+    std::optional<std::array<std::uint8_t, 32>> blake2;
     std::uint64_t comp_info, host;
     bool encrypted;
     std::optional<Timestamp> mtime;
@@ -209,6 +216,8 @@ FilePart read_file_part(const std::uint8_t* header, std::size_t header_size, Cur
     if (!valid_utf8(name_bytes, static_cast<std::size_t>(name_len), name)) corrupt("RAR file name is not valid UTF-8.");
 
     bool encrypted = false, redirected = false;
+    std::optional<std::array<std::uint8_t, 32>> blake2;
+    std::optional<std::uint64_t> version;
     Cursor extra(header + extra_start, extra_size);
     while (extra.remaining() > 0) {
         const auto size = extra.vint();
@@ -216,6 +225,19 @@ FilePart read_file_part(const std::uint8_t* header, std::size_t header_size, Cur
         Cursor rc(extra.bytes(static_cast<std::size_t>(size)), static_cast<std::size_t>(size));
         switch (rc.vint()) {
             case 1: encrypted = true; break;
+            case 2: {
+                if (rc.vint() == 0 && rc.remaining() >= 32) {      // hash type 0 = BLAKE2sp
+                    std::array<std::uint8_t, 32> h;
+                    std::memcpy(h.data(), rc.bytes(32), 32);
+                    blake2 = h;
+                }
+                break;
+            }
+            case 4: {                                              // file version: keep every version by suffixing ";N" (as libarchive does)
+                rc.vint();                                         // flags
+                version = rc.vint();
+                break;
+            }
             case 5: redirected = true; break;
             case 3: {
                 const auto tf = rc.vint();
@@ -229,12 +251,15 @@ FilePart read_file_part(const std::uint8_t* header, std::size_t header_size, Cur
         }
     }
 
+    if (version) name += ";" + std::to_string(*version);
+
     FilePart p;
     p.name = std::move(name);
     p.kind = kind_of(redirected, (file_flags & 0x01) != 0, host, attributes);
     p.unpacked = unpacked;
     p.unknown_size = (file_flags & 0x08) != 0;
     p.crc = crc;
+    p.blake2 = blake2;
     p.comp_info = comp_info;
     p.host = host;
     p.encrypted = encrypted;
@@ -249,14 +274,15 @@ struct Pending {
     std::uint64_t packed = 0;
 };
 
-FileInfo complete(Pending& p, std::optional<std::uint32_t> crc) {
+FileInfo complete(Pending& p, const FilePart& last) {
     const auto& f = p.first;
     FileInfo r;
     r.name = f.name;
     r.kind = f.kind;
     r.packed = p.packed;
     r.unpacked = f.unknown_size ? p.packed : f.unpacked;
-    r.crc = crc;
+    r.crc = last.crc;
+    r.blake2 = last.blake2;
     r.unknown_size = f.unknown_size;
     r.encrypted = f.encrypted;
     r.method = static_cast<int>((f.comp_info >> 7) & 7);
@@ -389,7 +415,7 @@ private:
 
             auto done = std::move(*pending_);
             pending_.reset();
-            files_.push_back(complete(done, part.crc));
+            files_.push_back(complete(done, part));
             return;
         }
 
@@ -401,8 +427,7 @@ private:
             pending_ = std::move(started);
             return;
         }
-        auto crc = started.first.crc;
-        files_.push_back(complete(started, crc));
+        files_.push_back(complete(started, started.first));
     }
 };
 
@@ -1012,6 +1037,32 @@ std::uint64_t next_power_of_two(std::uint64_t value) {
     return size;
 }
 
+// Running integrity check over a file's output: CRC-32 and/or BLAKE2sp, whichever the header carries (both if both).
+class Integrity {
+public:
+    explicit Integrity(const FileInfo& f) : crc_expected_(f.crc), b2_expected_(f.blake2) {
+        if (b2_expected_) blake2sp_init(&b2_, 32);
+    }
+    void update(const std::uint8_t* d, std::size_t n) {
+        crc_ = crc32_update(crc_, d, n);
+        if (b2_expected_) blake2sp_update(&b2_, d, n);
+    }
+    void verify() {
+        if (crc_expected_ && crc_ != *crc_expected_) corrupt("CRC-32 mismatch.");
+        if (b2_expected_) {
+            std::uint8_t out[32];
+            blake2sp_final(&b2_, out, 32);
+            if (std::memcmp(out, b2_expected_->data(), 32) != 0) corrupt("BLAKE2sp mismatch.");
+        }
+    }
+
+private:
+    std::optional<std::uint32_t> crc_expected_;
+    std::optional<std::array<std::uint8_t, 32>> b2_expected_;
+    std::uint32_t crc_ = 0;
+    blake2sp_state b2_{};
+};
+
 class ReaderImpl : public Reader {
 public:
     ReaderImpl(std::vector<std::unique_ptr<Volume>> volumes, std::vector<FileInfo> files, const Limits& limits)
@@ -1072,7 +1123,7 @@ private:
         if (f.unknown_size) return "RAR entries of unknown size are not supported.";
         if (f.method > 5) return "RAR compression method " + std::to_string(f.method) + " is not supported.";
         if (f.method != 0 && f.version != 0) return "RAR compression version " + std::to_string(f.version) + " is not supported.";
-        if (!f.crc) return "RAR entry has no CRC-32 (BLAKE2 integrity is not implemented yet).";
+        if (!f.crc && !f.blake2) return "RAR entry carries no integrity data (CRC-32 or BLAKE2sp).";
         return {};
     }
 
@@ -1095,19 +1146,19 @@ private:
     void read_stored(const FileInfo& f, const DataSink& sink) {
         constexpr std::size_t kChunk = 1 << 20;
         std::vector<std::uint8_t> buf(static_cast<std::size_t>(std::min<std::uint64_t>(kChunk, std::max<std::uint64_t>(f.packed, 1))));
-        std::uint32_t crc = 0;
+        Integrity integrity(f);
         std::uint64_t offset = 0;
         for (const auto& s : f.segments) {
             for (std::uint64_t pos = 0; pos < s.size;) {
                 const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(buf.size(), s.size - pos));
                 volumes_[s.volume]->read_at(s.offset + pos, buf.data(), n);
-                crc = crc32_update(crc, buf.data(), n);
+                integrity.update(buf.data(), n);
                 sink(buf.data(), n, offset);
                 offset += n;
                 pos += n;
             }
         }
-        if (crc != *f.crc) corrupt("CRC-32 mismatch.");
+        integrity.verify();
     }
 
     void read_compressed(std::size_t index, const DataSink& sink) {
@@ -1125,10 +1176,10 @@ private:
         const std::uint64_t window_limit = std::min(dictionary, next_power_of_two(total));
         if (window_limit > limits_.max_dictionary) throw Error(Status::LimitExceeded, "The RAR dictionary exceeds the configured memory limit.");
 
-        std::uint32_t crc = 0;
+        Integrity integrity(f);
         std::uint64_t offset = 0;
         const Emit verify = [&](const std::uint8_t* d, std::size_t n) {
-            crc = crc32_update(crc, d, n);
+            integrity.update(d, n);
             sink(d, n, offset);
             offset += n;
         };
@@ -1160,7 +1211,7 @@ private:
             throw;
         }
 
-        if (crc != *f.crc) corrupt("CRC-32 mismatch.");
+        integrity.verify();
     }
 };
 

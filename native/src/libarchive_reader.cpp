@@ -24,6 +24,7 @@ public:
 
         const bool hardlink = archive_entry_hardlink(e) != nullptr || archive_entry_hardlink_utf8(e) != nullptr;
         switch (archive_entry_filetype(e)) {
+            case 0:                      // unset: formats from DOS-era hosts (RAR 1.x-3.x on Windows) carry no Unix file type
             case AE_IFREG: f.kind = hardlink ? EntryKind::Hardlink : EntryKind::File; break;
             case AE_IFDIR: f.kind = EntryKind::Directory; break;
             case AE_IFLNK: f.kind = EntryKind::Symlink; break;

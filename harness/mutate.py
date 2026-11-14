@@ -29,11 +29,13 @@ MODE = os.environ.get("UNPAKZ_MUTATE_MODE", "linux")      # "windows": run the W
 WIN_FILTER = os.environ.get("UNPAKZ_MUTATE_WIN_FILTER", "FullyQualifiedName~DataObjectTests|FullyQualifiedName~RegistryTests")
 
 
-def run_tests():
+def run_tests(rel=None):
     """Returns (verdict, output). Verdicts: killed, survived, invalid, hang. Anything else is an infrastructure failure and aborts the run."""
     if MODE == "native":
         cmd = ["bash", "scripts/native-test.sh"]
         limit = TIMEOUT * 2
+        if rel and rel.endswith("rar5.cpp"): os.environ["UNPAKZ_CTEST_FILTER"] = "rar5_test|api_test"
+        else: os.environ.pop("UNPAKZ_CTEST_FILTER", None)
     elif MODE == "windows":
         cmd = ["bash", "scripts/winsync.sh", ".\\scripts\\wintest-run.ps1 -Filter '%s'" % WIN_FILTER]
         limit = TIMEOUT * 2
@@ -96,7 +98,7 @@ for mid, rel, find, repl in selected:
         continue
     with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(text.replace(find, repl))
-    verdict, out = run_tests()
+    verdict, out = run_tests(rel)
     restore()
     if verdict == "infra":
         print(f"{mid:6} INFRASTRUCTURE FAILURE: neither a pass nor a fail was reported; aborting so no verdict is invented.")

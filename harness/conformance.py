@@ -10,6 +10,19 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAR = os.path.join(ROOT, "tools", "rar", "rar")
 FIXTURES = os.path.join(ROOT, "tests", "Unpakz.Tests", "Fixtures")
 
+# Differences that are decisions, not bugs. Anything else that fails is a failure of the run.
+KNOWN = {
+    "corpus/rar5_bad_tables.rar": "no CRC-32 or BLAKE2sp in the header: refused because the output cannot be verified (unrar extracts unverified)",
+    "corpus/rar5_loop_bug.rar": "no CRC-32 or BLAKE2sp in the header: refused because the output cannot be verified",
+    "corpus/rar5_extra_field_underflow.rar": "malformed extra record: refused (strict header parsing; libarchive refuses it too, unrar tolerates)",
+    "corpus/rar5_extra_field_version.rar": "older file versions are kept as 'name;N' (libarchive does the same); unrar keeps only the newest",
+    "corpus/rar5_hardlink.rar": "links are never created (policy): unrar writes a copy",
+    "corpus/rar5_symlink.rar": "links are never created (policy)",
+    "corpus/rar5_unicode.rar": "contains a hard link, which is never created (policy)",
+    "corpus/rar_filter_incomplete_block.rar": "RAR 4 VM filter edge case that libarchive's RAR 4 reader refuses; unrar extracts it",
+    "corpus/rar_newsub_rr_over_1m.rar": "only a recovery-record service block: nothing to extract (unrar reports an error)",
+}
+
 def tree(path):
     out = {}
     for base, dirs, files in os.walk(path):
@@ -19,8 +32,12 @@ def tree(path):
             p = os.path.join(base, f)
             if os.path.islink(p):
                 continue
-            with open(p, "rb") as fh:
-                out[os.path.relpath(p, path).replace(os.sep, "/")] = hashlib.sha256(fh.read()).hexdigest()
+            try:
+                os.chmod(p, 0o600)    # some archives carry odd attributes (e.g. mode 0040 from DOS hosts)
+                with open(p, "rb") as fh:
+                    out[os.path.relpath(p, path).replace(os.sep, "/")] = hashlib.sha256(fh.read()).hexdigest()
+            except PermissionError:
+                out[os.path.relpath(p, path).replace(os.sep, "/")] = "<unreadable>"
     return out
 
 def make_data(root, seed=1):
@@ -40,17 +57,23 @@ def make_data(root, seed=1):
     w("sub/deep/code.bin", bytes([0xE8, 0x10, 0, 0, 0] * 5000 + [r.getrandbits(8) for _ in range(20000)]))
     w("unicode-é日本.txt", "unicode names\n".encode() * 100)
 
-def run(cmd, cwd=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600)
+def run(cmd, cwd=None, timeout=120):
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
 
 def oracle_extract(archive, dest, kind):
+    try:
+        return _oracle_extract(archive, dest, kind)
+    except subprocess.TimeoutExpired:
+        return False, "oracle timed out"
+
+def _oracle_extract(archive, dest, kind):
     os.makedirs(dest, exist_ok=True)
     if kind == "tar":
         p = run(["tar", "xzf", archive, "-C", dest])
     elif kind == "rar":
-        p = run(["unrar", "x", "-y", "-idq", archive, dest + "/"])
+        p = run(["unrar", "x", "-y", "-p-", "-idq", archive, dest + "/"])
     else:
-        p = run(["7z", "x", "-y", "-bd", f"-o{dest}", archive])
+        p = run(["7z", "x", "-y", "-bd", "-p", f"-o{dest}", archive])
     return p.returncode == 0, p.stdout + p.stderr
 
 def main():
@@ -58,6 +81,8 @@ def main():
     ap.add_argument("--cli", default=os.path.join(ROOT, "native", "build-linux", "unpakz_testcli"))
     ap.add_argument("--filter", default="")
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--corpus", action="store_true", help="also run corpus/external (third-party vectors, fetched by harness/fetch_corpus.py)")
+    ap.add_argument("--corpus-only", action="store_true")
     a = ap.parse_args()
     work = tempfile.mkdtemp(prefix="unpakz-conf-")
     cases = []   # (name, archive path, oracle kind)
@@ -107,22 +132,48 @@ def main():
     out = os.path.join(gen, "t.tar.gz"); add("tar.gz", ["tar", "czf", out, "."], out, "tar")
     out = os.path.join(gen, "t.tgz"); add("tgz-9", ["tar", "-I", "gzip -9", "-cf", out, "."], out, "tar")
 
+    corpus_cases = []
+    cdir = os.path.join(ROOT, "corpus", "external", "libarchive")
+    if (a.corpus or a.corpus_only) and os.path.isdir(cdir):
+        for f in sorted(os.listdir(cdir)):
+            if f == "MANIFEST.txt" or f.startswith("7zip_"): continue      # 7-Zip SFX files are 7z archives: out of scope
+            if ".part" in f and not (".part01." in f or ".part0001." in f or ".part1." in f): continue   # only the first volume starts a set
+            corpus_cases.append(("corpus/" + f, os.path.join(cdir, f), "rar" if ".rar" in f else "7z"))
+    if a.corpus_only: cases = []
+    cases = cases + corpus_cases
+
     failures = 0
     for name, archive, kind in cases:
         if a.filter and a.filter not in name: continue
         ours = os.path.join(work, "ours", name.replace("/", "_"))
         theirs = os.path.join(work, "theirs", name.replace("/", "_"))
         ok, why = oracle_extract(archive, theirs, kind)
-        p = run([a.cli, "x", archive, "-o", ours])
+        try:
+            p = run([a.cli, "x", archive, "-o", ours])
+        except subprocess.TimeoutExpired:
+            print(f"HANG {name}"); failures += 1; continue
+        if p.returncode < 0 or p.returncode > 10:
+            print(f"CRASH {name}: exit {p.returncode}: {p.stderr.strip()[-300:]}"); failures += 1; continue
         if not ok:
-            print(f"ORACLE-FAIL {name}: {why.strip()[-200:]} (unpakz exit {p.returncode})"); continue
+            # the oracle refuses it (encrypted, damaged, hostile): unpakz must refuse it too, with a typed error, and write nothing wrong
+            if p.returncode == 0:
+                t = tree(ours)
+                if name in KNOWN: print(f"known {name}: {KNOWN[name]}")
+                else:
+                    print(f"ODD  {name}: oracle refused ({why.strip()[-80:]!r}) but unpakz extracted {len(t)} entries"); failures += 1
+            else:
+                print(f"both-refuse {name}: unpakz status {p.returncode}")
+            continue
         if p.returncode != 0:
-            print(f"FAIL {name}: unpakz exit {p.returncode}: {p.stderr.strip()[-300:]}"); failures += 1; continue
+            if name in KNOWN: print(f"known {name}: {KNOWN[name]}")
+            else: print(f"FAIL {name}: unpakz exit {p.returncode}: {p.stderr.strip()[-300:]}"); failures += 1
+            continue
         t1, t2 = tree(ours), tree(theirs)
         if t1 != t2:
             only1 = sorted(set(t1) - set(t2)); only2 = sorted(set(t2) - set(t1))
             diff = sorted(k for k in set(t1) & set(t2) if t1[k] != t2[k])
-            print(f"MISMATCH {name}: only-unpakz={only1[:3]} only-oracle={only2[:3]} different={diff[:3]}"); failures += 1
+            if name in KNOWN: print(f"known {name}: {KNOWN[name]}")
+            else: print(f"MISMATCH {name}: only-unpakz={only1[:3]} only-oracle={only2[:3]} different={diff[:3]}"); failures += 1
         else:
             print(f"ok   {name} ({len(t1)} entries)")
     print(f"\n{failures} failure(s)")
