@@ -6,8 +6,8 @@ cd "$(dirname "$0")"
 mode="${1:-fast}"
 case "$mode" in
   fast)
-    dotnet build -c Release --nologo -v q -warnaserror
-    dotnet test -c Release --nologo --no-build -v q
+    dotnet build Unpakz.slnx -c Release --nologo -v q -warnaserror
+    dotnet test Unpakz.slnx -c Release --nologo --no-build -v q
     ;;
   full)
     "$0" fast

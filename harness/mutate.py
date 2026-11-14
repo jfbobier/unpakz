@@ -26,7 +26,7 @@ TIMEOUT = 240   # seconds; a mutant that makes the code hang is detected, not st
 
 def run_tests():
     try:
-        p = subprocess.run(["dotnet", "test", "-c", "Release", "--nologo", "-v", "q"], cwd=ROOT, capture_output=True, text=True,
+        p = subprocess.run(["dotnet", "test", "Unpakz.slnx", "-c", "Release", "--nologo", "-v", "q"], cwd=ROOT, capture_output=True, text=True,
                            env={**os.environ, "UNPAKZ_REQUIRE_ORACLE": "1"}, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         subprocess.run(["pkill", "-f", "testhost"], check=False)
