@@ -86,6 +86,11 @@ Result extract_archive(const ArchiveSource& source, const std::u16string& destin
 // Throws Status::MissingVolume (volume = first missing number, 1-based) when the numbers have a gap, Status::Io if the file is absent.
 std::vector<std::u16string> locate_volumes(const std::u16string& path, std::uint32_t max_volumes = 65536);
 
+// Streams the decoded bytes of the entry at position `index` (the `index` that list_archive reports) to `sink`; `sink` returns false to stop
+// (Status::Cancelled). Integrity is verified after the last byte: a mismatch throws after the bytes were delivered. Nothing is written to disk.
+// Directories deliver nothing; links, special files and entries that cannot be extracted throw.
+void read_entry(const ArchiveSource& source, std::uint64_t index, const Limits& limits, const std::function<bool(const std::uint8_t*, std::size_t)>& sink);
+
 // Lists entries (names are guarded: refused names have empty relative_path).
 std::vector<EntryInfo> list_archive(const ArchiveSource& source, const Limits& limits = {});
 

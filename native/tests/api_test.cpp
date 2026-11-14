@@ -205,4 +205,44 @@ TEST(error_messages_are_always_terminated_and_truncated_safely) {
     CHECK(terminated);
 }
 
+TEST(read_entry_streams_one_entry_exactly_for_every_format) {
+    Dir d;
+    auto tree = std::vector<Ent>{file("a.txt", txt(3000, 1)), dir("sub"), file("sub/b.bin", rnd(900000, 2)), file("e", "")};
+    d.write("t.zip", make_zip(tree));
+    d.write("t.tar.gz", make_targz(tree));
+    struct Got { std::string bytes; int stop_after = -1; int calls = 0; } got;
+    auto cb = [](const std::uint8_t* p, std::uint64_t n, void* u) -> int32_t { auto* g = static_cast<Got*>(u); g->bytes.append(reinterpret_cast<const char*>(p), n); return ++g->calls != g->stop_after; };
+    for (auto name : {"t.zip", "t.tar.gz"}) {
+        auto err = make_error();
+        for (std::uint64_t idx = 0; idx < 4; ++idx) {
+            Got g;
+            auto st = unpakz_read_entry(d.u(name).c_str(), idx, nullptr, cb, &g, &err);
+            CHECK_EQ(st, UNPAKZ_OK);
+            const Ent& e = tree[idx];
+            CHECK_EQ(g.bytes, e.type == AE_IFREG ? e.data : std::string());     // a directory yields nothing
+        }
+        Got stopped; stopped.stop_after = 1;
+        CHECK_EQ(unpakz_read_entry(d.u(name).c_str(), 2, nullptr, cb, &stopped, &err), UNPAKZ_CANCELLED);
+        CHECK_EQ(stopped.calls, 1);
+        Got none;
+        CHECK_EQ(unpakz_read_entry(d.u(name).c_str(), 99, nullptr, cb, &none, &err), UNPAKZ_INVALID_ARGUMENT);
+        CHECK_EQ(unpakz_read_entry(d.u(name).c_str(), 0, nullptr, nullptr, &none, &err), UNPAKZ_INVALID_ARGUMENT);
+        unpakz_limits small{}; small.struct_size = sizeof small; unpakz_default_limits(&small); small.max_entry_size = 100;
+        CHECK_EQ(unpakz_read_entry(d.u(name).c_str(), 0, &small, cb, &none, &err), UNPAKZ_LIMIT_EXCEEDED);
+    }
+}
+
+TEST(read_entry_delivers_the_bytes_before_a_checksum_failure_and_then_reports_it) {
+    Dir d;
+    auto zip = make_zip({file("bad.bin", rnd(4000, 5))}, false);          // stored: the payload is visible
+    auto pos = std::string(zip.begin(), zip.end()).find(rnd(4000, 5).substr(1000, 50));
+    zip[pos + 10] ^= 0x55;
+    d.write("bad.zip", zip);
+    std::size_t total = 0;
+    auto cb = [](const std::uint8_t*, std::uint64_t n, void* u) -> int32_t { *static_cast<std::size_t*>(u) += n; return 1; };
+    auto err = make_error();
+    CHECK_EQ(unpakz_read_entry(d.u("bad.zip").c_str(), 0, nullptr, cb, &total, &err), UNPAKZ_CORRUPT);
+    CHECK(total > 0);
+}
+
 UT_MAIN()

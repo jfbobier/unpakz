@@ -162,4 +162,26 @@ TEST(truncation_at_every_length_is_a_typed_error) {
     }
 }
 
+TEST(read_entry_matches_extraction_for_every_file_of_solid_and_volume_archives) {
+    auto bytes = read_file(fixture("rar5-m5-solid.rar"));
+    auto full = extract_memory(bytes);
+    auto src = ArchiveSource::from_memory(bytes.data(), bytes.size());
+    for (auto& e : list_archive(src)) {
+        if (e.kind != EntryKind::File) continue;
+        std::vector<std::uint8_t> got;
+        read_entry(src, e.index, Limits{}, [&](const std::uint8_t* p, std::size_t n) { got.insert(got.end(), p, p + n); return true; });
+        std::u16string key = kDest; key.push_back(kNativeSeparator);
+        for (auto c : e.relative_path) key.push_back(c == u'/' ? kNativeSeparator : c);
+        CHECK(got == full.at(key));
+    }
+    auto vols = locate_volumes((fixture("mv-solid") / "a.part01.rar").u16string());
+    ArchiveSource set; set.files = vols;
+    for (auto& e : list_archive(set)) {
+        if (e.kind != EntryKind::File) continue;
+        std::uint64_t n = 0;
+        read_entry(set, e.index, Limits{}, [&](const std::uint8_t*, std::size_t k) { n += k; return true; });
+        CHECK_EQ(n, e.size);
+    }
+}
+
 UT_MAIN()

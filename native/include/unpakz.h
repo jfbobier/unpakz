@@ -102,6 +102,8 @@ typedef struct unpakz_progress {
 typedef int32_t (*unpakz_entry_fn)(const unpakz_entry* entry, void* user);
 typedef void (*unpakz_progress_fn)(const unpakz_progress* progress, void* user);
 typedef int32_t (*unpakz_cancel_fn)(void* user); /* return non-zero to cancel */
+/* Receives decoded bytes of one entry; return non-zero to continue, zero to stop (the call then returns UNPAKZ_CANCELLED). */
+typedef int32_t (*unpakz_data_fn)(const uint8_t* data, uint64_t size, void* user);
 
 typedef struct unpakz_extract_options {
     uint32_t struct_size;
@@ -137,6 +139,11 @@ UNPAKZ_API unpakz_status unpakz_list(const char16_t* path, const unpakz_limits* 
 /* Extracts into `destination` (created if missing). Nothing is written when the plan is refused. */
 UNPAKZ_API unpakz_status unpakz_extract(const char16_t* path, const char16_t* destination, const unpakz_extract_options* options,
                                         unpakz_result* result, unpakz_error* error);
+
+/* Streams the decoded bytes of one entry (`entry_index` as reported by unpakz_list) to `callback`, without writing anything to disk. The checksum
+ * is verified after the last byte; a mismatch returns UNPAKZ_CORRUPT after the bytes were delivered, so a receiver must discard what it got. */
+UNPAKZ_API unpakz_status unpakz_read_entry(const char16_t* path, uint64_t entry_index, const unpakz_limits* limits, unpakz_data_fn callback, void* user,
+                                           unpakz_error* error);
 
 /* Runs the path guard on one name (for front ends that show or forward names). Returns UNPAKZ_OK and writes the relative path,
  * or UNPAKZ_UNSAFE_PATH with the reason in `error`. `out` must have room for out_chars UTF-16 units (including the NUL). */

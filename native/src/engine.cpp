@@ -416,4 +416,37 @@ std::vector<EntryInfo> list_archive(const ArchiveSource& source, const Limits& l
     return out;
 }
 
+void read_entry(const ArchiveSource& source, std::uint64_t index, const Limits& limits, const std::function<bool(const std::uint8_t*, std::size_t)>& sink) {
+    ScopedUtf8Locale utf8_names;
+    auto reader = open_entries(source, limits, RarEngine::Native);
+    EntryFacts facts;
+    std::uint64_t at = 0;
+    while (reader->next(facts)) {
+        if (at++ != index) continue;
+        if (facts.kind == EntryKind::Directory) return;
+        if (facts.kind != EntryKind::File) throw Error(Status::InvalidArgument, "the entry is not a regular file");
+        if (!facts.unsupported.empty()) throw Error(Status::Unsupported, facts.unsupported);
+        if (facts.size_known && facts.size > limits.max_entry_size) throw Error(Status::LimitExceeded, "the entry is larger than the allowed entry size");
+
+        std::uint64_t written = 0;
+        static const std::vector<std::uint8_t> zeros(1 << 16, 0);
+        reader->read_data([&](const std::uint8_t* buf, std::size_t size, std::uint64_t offset) {
+            if (offset < written) throw Error(Status::Corrupt, "data blocks out of order");
+            for (std::uint64_t gap = offset - written; gap > 0;) {      // holes are delivered as zeros
+                auto n = static_cast<std::size_t>(std::min<std::uint64_t>(gap, zeros.size()));
+                if (written + n > limits.max_entry_size) throw Error(Status::LimitExceeded, "the entry exceeds the allowed entry size while unpacking");
+                if (!sink(zeros.data(), n)) throw Error(Status::Cancelled, "stopped by the caller");
+                written += n; gap -= n;
+            }
+            if (written + size > limits.max_entry_size) throw Error(Status::LimitExceeded, "the entry exceeds the allowed entry size while unpacking");
+            if (facts.size_known && written + size > facts.size) throw Error(Status::Corrupt, "the entry has more data than its header declares");
+            if (!sink(buf, size)) throw Error(Status::Cancelled, "stopped by the caller");
+            written += size;
+        });
+        if (facts.size_known && written != facts.size) throw Error(Status::Corrupt, "the entry is shorter than its header declares");
+        return;
+    }
+    throw Error(Status::InvalidArgument, "there is no entry with that index");
+}
+
 }  // namespace unpakz

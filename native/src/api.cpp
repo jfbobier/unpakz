@@ -166,6 +166,18 @@ UNPAKZ_API unpakz_status unpakz_extract(const char16_t* path, const char16_t* de
     });
 }
 
+UNPAKZ_API unpakz_status unpakz_read_entry(const char16_t* path, uint64_t entry_index, const unpakz_limits* limits, unpakz_data_fn callback, void* user, unpakz_error* error) {
+    return guarded(error, [&]() -> unpakz_status {
+        if (!path || !*path || !callback) return fail(error, Status::InvalidArgument, "path and callback are required");
+        Limits lim;
+        if (!to_limits(limits, lim)) return fail(error, Status::InvalidArgument, "limits struct has the wrong size");
+        ArchiveSource src;
+        src.files = locate_volumes(path, lim.max_volumes);
+        read_entry(src, entry_index, lim, [&](const std::uint8_t* d, std::size_t n) { return callback(d, n, user) != 0; });
+        return ok(error);
+    });
+}
+
 UNPAKZ_API unpakz_status unpakz_check_name(const char16_t* name, char16_t* out, uint32_t out_chars, unpakz_error* error) {
     return guarded(error, [&]() -> unpakz_status {
         if (!name || !out || out_chars == 0) return fail(error, Status::InvalidArgument, "name and output buffer are required");
