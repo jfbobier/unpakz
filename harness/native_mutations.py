@@ -233,6 +233,14 @@ MUTANTS += RAR5_MUTANTS
 
 # Mutants that cannot change observable behaviour, with the reason. Everything else that survives is a test gap.
 EQUIVALENT = {
+    "ND3": "PackedStream::read_exactly enforces the same bound with the same message; the block-size check is a clearer earlier statement of it",
+    "ND11": "an over-subscribed bit-length table cannot make the decoder accept wrong data: every output byte is still checked against the declared size and the CRC-32/BLAKE2sp",
+    "ND23": "length code 7 takes the general branch (lbits = 0, base 4|3 = 7) and yields the same length as the small-code branch",
+    "ND26": "distance slot 3 takes the general branch (dbits = 0, base 2|1 = 3) and yields the same distance as the small-slot branch",
+    "ND66": "bit 0 of the 16-bit peek is never significant: every decode position is shifted right by at least one bit",
+    "ND7": "reads table[-1] (out of bounds); only the sanitizer build can see it, and it is killed there (verified with UNPAKZ_NATIVE_BUILD=asan)",
+    "ND64": "out-of-bounds read in Huffman decode for incomplete codes; killed by the sanitizer build (verified with UNPAKZ_NATIVE_BUILD=asan)",
+    "ND65": "quick-table entries with code length 16 describe bit patterns above decode_len[quick_bits], which decode() never looks up in the quick table",
     "NR57": "unreachable since next() refuses a directory that claims data at plan time; the read_data check is defence in depth",
     "NR62": "only reachable when an earlier file of a group is read after a later one, which the sequential reader cannot do; a failed read resets the decoder anyway",
     "NR65": "after a failed decode the next read re-decodes the earlier members and the requested file's CRC-32/BLAKE2sp still has to match, so poisoned window state cannot produce accepted wrong data",

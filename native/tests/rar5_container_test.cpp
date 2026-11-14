@@ -729,11 +729,10 @@ static SolidSet solid_archive(bool stored_in_between = false, bool third_is_soli
     m.start_new_file(true);
     auto f2 = RarBlockBuilder(m).match(500, 1500).literals("x").build();
     s.out2 = m.file_output();
-    m.start_new_file(third_is_solid);
-    Bytes f3;
-    if (third_is_solid) f3 = RarBlockBuilder(m).match(700, 1800).literals("y").build();
-    else f3 = RarBlockBuilder(m).literals(rb(10, 5)).match(20, 1800, false).build();      // reaches back before its own start
-    s.out3 = third_is_solid ? m.file_output() : Bytes(30, 0);
+    m.start_new_file(true);
+    // The stream reaches back into the earlier files; whether the header admits that (the solid flag) is what differs.
+    Bytes f3 = RarBlockBuilder(m).match(700, 1800).literals("y").build();
+    s.out3 = m.file_output();
     auto opts = [](const Bytes& out, bool solid) { FileOpts o; o.method = 3; o.solid = solid; o.unpacked_override = out.size(); o.crc_override = crc_of(out); return o; };
     Rar5Builder b;
     b.add_file("1", f1, opts(s.out1, false));

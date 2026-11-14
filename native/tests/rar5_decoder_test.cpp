@@ -297,6 +297,26 @@ TEST(table_repeat_and_zero_run_codes_expand_correctly) {
     CHECK(decode_new(b.build(), 3) == B("rep"));
 }
 
+TEST(the_long_zero_run_escape_and_a_fifteen_bit_length_are_used_for_real) {
+    // BC symbol 19 (zero run of 11..138) has a 15-bit code, written with the "literal 15" nibble escape; the table below needs it.
+    std::vector<int> bc(20, 0);
+    bc[9] = 1; bc[6] = 2; bc[4] = 3; bc[0] = 4; bc[19] = 15;
+    RarHuffmanEncoder enc(bc);
+    RarModel m;
+    RarBlockBuilder b(m, raw([&](RarBitWriter& w) {
+        for (int i = 0; i < 20; ++i) {
+            if (bc[static_cast<std::size_t>(i)] == 15) { w.write(15, 4); w.write(0, 4); } else w.write(bc[static_cast<std::size_t>(i)], 4);
+        }
+        for (int i = 0; i < 256; ++i) enc.write(w, 9);                  // literals 0..255
+        enc.write(w, 19); w.write(50 - 11, 7);                          // 50 unused length symbols 256..305
+        for (int i = 0; i < 64; ++i) enc.write(w, 6);
+        for (int i = 0; i < 16; ++i) enc.write(w, 4);
+        for (int i = 0; i < 44; ++i) enc.write(w, 6);
+    }));
+    b.literals("zero-run");
+    CHECK(decode_new(b.build(), 8) == B("zero-run"));
+}
+
 TEST(table_runs_that_overshoot_the_end_are_clamped_not_overflowed) {
     RarModel m;
     RarBlockBuilder b(m, raw([](RarBitWriter& w) {
@@ -408,6 +428,15 @@ TEST(distance_before_the_start_beyond_the_dictionary_and_beyond_the_window_are_r
     CHECK(rejected(RarBlockBuilder(fresh()).literals(rb(300'000, 3)).match(10, 200'000, false).build(), 300'010, nullptr, false, 1 << 22, 1 << 17));
 }
 
+TEST(distance_beyond_the_declared_dictionary_is_rejected_even_when_the_window_could_hold_it) {
+    // dictionary 128 KiB (format-level limit), window 1 MiB: a distance of 150,000 is inside the window but outside what the archive declared
+    auto block = RarBlockBuilder(fresh()).literals(rb(200'000, 3)).match(5, 150'000, false).build();
+    CHECK(rejected(block, 200'005, nullptr, false, 1 << 17, 1 << 20));
+    RarModel m;
+    auto ok = RarBlockBuilder(m).literals(rb(200'000, 3)).match(5, 131'072).build();
+    CHECK(decode_new(ok, 200'005, 1 << 17, 1 << 20) == m.file_output());
+}
+
 TEST(output_longer_or_shorter_than_declared_is_rejected_for_literals_and_matches) {
     CHECK(rejected(RarBlockBuilder(fresh()).literals("abcde").build(), 3));
     CHECK(rejected(RarBlockBuilder(fresh()).literals("abc").match(100, 1, false).build(), 20));
@@ -444,7 +473,7 @@ TEST(invalid_filter_lengths_are_rejected) {
 }
 
 TEST(filter_longer_than_half_the_dictionary_is_rejected) {
-    CHECK(rejected(RarBlockBuilder(fresh()).filter(1, 0, 70'000).literals(Bytes{1, 2, 3, 4}).build(), 4, nullptr, false, 1 << 17, 1 << 17));
+    CHECK(rejected(RarBlockBuilder(fresh()).filter(1, 0, 70'000).literals(Bytes(70'000, 0)).build(), 70'000, nullptr, false, 1 << 17, 1 << 17));      // all data present: only the length is wrong
     auto ok = RarBlockBuilder(fresh()).filter(1, 0, 65'536).literals(Bytes(65'536, 0)).build();
     CHECK(!rejected(ok, 65'536, nullptr, false, 1 << 17, 1 << 17));
 }
