@@ -61,3 +61,21 @@ Licence per its `COPYING`: BSD-2-Clause for the library, with these exceptions t
 `archive_read_support_filter_compress.c` (3-clause UC Regents), `archive_parse_date.c` (public domain), `archive_blake2*.{c,h}`
 (CC0 / OpenSSL / Apache-2.0, our choice), and build scripts with varying terms (CMake files are used as shipped).
 Optional dependencies (zlib-ng, bzip2, xz, zstd, crypto) are off for now; zlib is required for gzip and ZIP deflate.
+
+## Vendored: zlib-ng 2.2.5 (`third_party/zlib-ng/`)
+
+Source: https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.2.5.tar.gz, SHA-256 `5b3b022489f3ced82384f06db1e13ba148cbce38c7941e424d6cb414416acd18`
+(computed on download). Built in zlib-compatible mode; used by libarchive (gzip, ZIP deflate) and for CRC-32 in the RAR 5 reader. Unmodified except
+that tests, docs and CI files were removed. Licence: zlib licence (`third_party/zlib-ng/LICENSE.md`).
+
+## Test data: libarchive's RAR vectors (`corpus/external/`, git-ignored, never committed)
+
+`harness/fetch_corpus.py` decodes libarchive's uuencoded RAR test archives from the pinned libarchive tarball into `corpus/external/libarchive/`
+(102 files, BSD-2-Clause test data from the libarchive project; SHA-256 manifest written next to them). They include libarchive's own security
+regressions and are only ever opened by the test harness.
+
+## RAR 5 reader
+
+`native/src/rar5.cpp` is a C++ port of the C# decoder in `src/Unpakz.Core/Rar/`; the decoding algorithm follows libarchive's RAR5 reader
+(Copyright (c) 2018 Grzegorz Antoniak, BSD-2-Clause) as before. It uses libarchive's BLAKE2sp (CC0 / OpenSSL / Apache-2.0, our choice) through the
+vendored static library.
