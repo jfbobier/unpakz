@@ -77,6 +77,10 @@ struct Result {
 // Throws unpakz::Error. Nothing is written when the plan is refused.
 Result extract_archive(const ArchiveSource& source, const std::u16string& destination, const Options& options = {});
 
+// Finds every volume of a RAR set ("name.partN.rar") from any one of them, in numeric order; any other name is a set of one.
+// Throws Status::MissingVolume (volume = first missing number, 1-based) when the numbers have a gap, Status::Io if the file is absent.
+std::vector<std::u16string> locate_volumes(const std::u16string& path, std::uint32_t max_volumes = 65536);
+
 // Lists entries (names are guarded: refused names have empty relative_path).
 std::vector<EntryInfo> list_archive(const ArchiveSource& source, const Limits& limits = {});
 
