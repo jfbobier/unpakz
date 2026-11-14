@@ -257,6 +257,28 @@ public class ArchiveExtractorTests
     }
 
     [Fact]
+    public void File_that_appears_after_the_preflight_is_refused_before_any_data_is_decoded_for_it()
+    {
+        var fs = new InMemoryFileSystem(Dest);
+        fs.OnCreateFile = final => { if (final == P("a.txt")) fs.Files[P("b.txt")] = "RACE"u8.ToArray(); };
+        var zip = new ZipBuilder().Add("a.txt", Rnd(10)).Add("b.txt", Rnd(10)).Build();
+        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() => Run(zip, fs)).Error);
+        Assert.Equal("RACE"u8.ToArray(), fs.Files[P("b.txt")]);
+        Assert.DoesNotContain(fs.TempFiles, t => t.Final == P("b.txt"));          // refused at the check, not at the commit
+    }
+
+    [Fact]
+    public void Directory_that_appears_after_the_preflight_is_refused_before_any_data_is_decoded_for_it()
+    {
+        var fs = new InMemoryFileSystem(Dest);
+        fs.OnCreateFile = final => { if (final == P("a.txt")) fs.Dirs.Add(P("b.txt")); };
+        var zip = new ZipBuilder().Add("a.txt", Rnd(10)).Add("b.txt", Rnd(10)).Build();
+        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() =>
+            Run(zip, fs, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite })).Error);
+        Assert.DoesNotContain(fs.TempFiles, t => t.Final == P("b.txt"));
+    }
+
+    [Fact]
     public void Destination_that_is_a_file_is_a_conflict()
     {
         var fs = new InMemoryFileSystem(Dest);

@@ -167,7 +167,9 @@ public class Rar5MultiVolumeTests
     {
         var single = new Rar5Builder().AddFile("a", [1]).Build();
         var (vols, _, _, _) = Sample();
-        Assert.Equal(ArchiveError.Corrupt, OpenFails([single, vols[1]]).Error);
+        var ex = OpenFails([single, vols[1]]);
+        Assert.Equal(ArchiveError.Corrupt, ex.Error);
+        Assert.Contains("not part of a multi-volume set", ex.Message, StringComparison.Ordinal);   // named for what it is, not a knock-on error from a later volume
     }
 
     [Fact]
@@ -246,6 +248,27 @@ public class Rar5MultiVolumeTests
         var x = new Rar5Builder().AddFile("pad", Rnd(100, 2)).AddFile("g", Rnd(50, 3)).BuildVolumes(100);
         Assert.Equal(2, x.Count);
         Assert.Equal(ArchiveError.Corrupt, OpenFails([y[0], x[1]]).Error);
+    }
+
+    [Fact]
+    public void A_repeated_middle_volume_is_reported_as_out_of_order_even_when_its_content_would_fit()
+    {
+        var (vols, _, _, _) = Sample();
+        // volume 2 again in the third slot: its continuation part agrees with the pending file, so only the volume number can expose it
+        var ex = OpenFails([vols[0], vols[1], vols[1], .. vols.Skip(2)]);
+        Assert.Equal(ArchiveError.Corrupt, ex.Error);
+        Assert.Contains("out of order", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_fresh_entry_with_the_same_name_does_not_count_as_the_continuation()
+    {
+        // Set Y: "f" (250 bytes) starts in volume 1 and continues. Set X: its volume 2 begins a NEW "f" with identical attributes but no continuation flag.
+        var y = new Rar5Builder().AddFile("f", Rnd(250, 1)).BuildVolumes(100);
+        var x = new Rar5Builder().AddFile("pad", Rnd(100, 2)).AddFile("f", Rnd(250, 3)).BuildVolumes(100);
+        var ex = OpenFails([y[0], x[1]]);
+        Assert.Equal(ArchiveError.Corrupt, ex.Error);
+        Assert.Contains("different entry follows", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -135,6 +135,7 @@ public sealed class DataObjectTests : IDisposable
         using (vm) using (obj)
         {
             var folder = drag.Items.ToList().FindIndex(i => i.IsDirectory);
+            Assert.True(folder >= 0, "the drag list must contain a folder for this check to mean anything");
             foreach (var index in new[] { folder, -1, drag.Items.Count, 9999 })
             {
                 var f = Format("FileContents", TYMED.TYMED_ISTREAM, index);
@@ -219,6 +220,7 @@ public sealed class DataObjectTests : IDisposable
             var f = Format("Preferred DropEffect", TYMED.TYMED_HGLOBAL);
             com.GetData(ref f, out var m);
             Assert.Equal(1, BinaryPrimitives.ReadInt32LittleEndian(ReadHGlobal(m)));          // DROPEFFECT_COPY
+            Assert.Equal(0, com.QueryGetData(ref f));                                          // and it is advertised as available
 
             var performed = Format("Performed DropEffect", TYMED.TYMED_HGLOBAL);
             var medium = new STGMEDIUM { tymed = TYMED.TYMED_HGLOBAL, unionmember = NativeMethods.AllocGlobal([1, 0, 0, 0]) };
@@ -268,6 +270,11 @@ public sealed class DataObjectTests : IDisposable
                 Assert.Equal(unchecked((int)0x80030001), back.HResult);                        // STG_E_INVALIDFUNCTION
                 var rest = ReadAll(s, 1000);
                 Assert.True(Tree["a.txt"].AsSpan(150).SequenceEqual(rest));
+
+                var fresh = GetContents(obj, index);                                           // a second stream, to seek from the end
+                fresh.Seek(-10, 2, posPtr);                                                    // STREAM_SEEK_END is relative to the length
+                Assert.Equal(Tree["a.txt"].Length - 10, Marshal.ReadInt64(posPtr));
+                Assert.True(Tree["a.txt"].AsSpan(Tree["a.txt"].Length - 10).SequenceEqual(ReadAll(fresh, 100)));
             }
             finally { Marshal.FreeCoTaskMem(posPtr); }
         }

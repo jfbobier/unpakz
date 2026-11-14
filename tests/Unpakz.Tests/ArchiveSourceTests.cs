@@ -41,6 +41,13 @@ public sealed class ArchiveSourceTests : IDisposable
     }
 
     [Fact]
+    public void A_neighbouring_set_never_extends_this_one()
+    {
+        Touch("a.part1.rar"); Touch("a.part2.rar"); Touch("b.part3.rar");
+        Assert.Equal(["a.part1.rar", "a.part2.rar"], Names(VolumeLocator.Find(Path.Combine(_dir, "a.part1.rar"))));
+    }
+
+    [Fact]
     public void Matching_ignores_letter_case()
     {
         Touch("Doc.PART1.RAR"); Touch("doc.part2.rar");
@@ -115,6 +122,18 @@ public sealed class ArchiveSourceTests : IDisposable
         Assert.Equal(4, memory.Span.Length);
         mapped.Dispose();
         Assert.Throws<ObjectDisposedException>(() => memory.Span.Length);
+    }
+
+    [Fact]
+    public void Disposing_unmaps_the_file_from_the_process()
+    {
+        if (!OperatingSystem.IsLinux()) return;                 // /proc/self/maps is the observable; Windows is covered by the delete-after-dispose check below
+        var path = Touch("unmap.bin", new byte[100_000]);
+        var mapped = MappedFile.Open(path);
+        Assert.Contains(path, File.ReadAllText("/proc/self/maps"), StringComparison.Ordinal);
+        mapped.Dispose();
+        Assert.DoesNotContain(path, File.ReadAllText("/proc/self/maps"), StringComparison.Ordinal);
+        File.Delete(path);                                       // fails with a sharing violation on Windows if the view leaked
     }
 
     [Fact]
