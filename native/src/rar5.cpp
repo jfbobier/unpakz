@@ -1077,6 +1077,7 @@ public:
         if (next_ >= files_.size()) return false;
         current_ = next_++;
         const FileInfo& f = files_[current_];
+        if (f.kind == EntryKind::Directory && f.unpacked != 0) corrupt("Directory entry has data.");   // found at plan time, before anything is written
         facts = EntryFacts{};
         facts.name_utf8 = f.name;
         facts.name_valid = true;

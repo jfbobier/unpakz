@@ -34,7 +34,7 @@ def run_tests(rel=None):
     if MODE == "native":
         cmd = ["bash", "scripts/native-test.sh"]
         limit = TIMEOUT * 2
-        if rel and rel.endswith("rar5.cpp"): os.environ["UNPAKZ_CTEST_FILTER"] = "rar5_test|api_test"
+        if rel and rel.endswith("rar5.cpp"): os.environ["UNPAKZ_CTEST_FILTER"] = "rar5_test|rar5_container_test|api_test"
         else: os.environ.pop("UNPAKZ_CTEST_FILTER", None)
     elif MODE == "windows":
         cmd = ["bash", "scripts/winsync.sh", ".\\scripts\\wintest-run.ps1 -Filter '%s'" % WIN_FILTER]

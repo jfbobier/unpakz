@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- .NET Framework 4.8 ships with Windows 11: no runtime to install. See docs/decisions/0003. -->
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>Unpakz.Interop</RootNamespace>
+    <AssemblyName>Unpakz.Interop</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Reference assemblies so net48 libraries also build on Linux (build-time only; MIT). -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+</Project>
