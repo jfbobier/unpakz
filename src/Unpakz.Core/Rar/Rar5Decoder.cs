@@ -21,7 +21,7 @@ internal sealed class DecoderStats
     public int E8;
     public int E8E9;
     public int Arm;
-    public int Wraps;
+    public int FilesDecoded;
 }
 
 internal sealed class Rar5Decoder
@@ -30,7 +30,7 @@ internal sealed class Rar5Decoder
     private const int HuffTableSize = HuffNc + HuffDc + HuffRc + HuffLdc;
     private const int MaxFilterLength = 0x400000;
     private const int MaxPendingFilters = 1024;
-    private const int InitialWindow = 1 << 20;
+    private const int InitialWindow = 1 << 16;
 
     private readonly long _dictionary;       // declared dictionary size (format-level validity limit)
     private readonly long _windowLimit;      // largest window we will ever allocate (power of two)
@@ -128,13 +128,12 @@ internal sealed class Rar5Decoder
 
         var expected = (byte)(0x5A ^ flags ^ (blockSize & 0xFF) ^ ((blockSize >> 8) & 0xFF) ^ ((blockSize >> 16) & 0xFF));
         if (expected != checksum) throw new ArchiveException("RAR block header checksum mismatch.");
-        if ((long)blockSize > input.Remaining) throw new ArchiveException("RAR block extends past the compressed data.");
 
         var tablePresent = (flags & 0x80) != 0;
         var isLast = (flags & 0x40) != 0;
         var bitSize = (flags & 7) + 1;
 
-        var data = input.Take(blockSize);
+        var data = input.Take(blockSize);                    // throws if the block extends past the compressed data
         var bits = new Bits(data.Span);
         if (tablePresent) ParseTables(ref bits);
         else if (!_haveTables) throw new ArchiveException("RAR block uses Huffman tables that were never defined.");
@@ -500,7 +499,7 @@ internal sealed class Rar5Decoder
         if (type > 3) throw new ArchiveException($"Unsupported RAR filter type {type}.", ArchiveError.Unsupported);
 
         var startRel = (_write - _fileBase) + start;
-        var validStart = _lastFilterStart == 0 || _lastFilterLength == 0 || startRel >= _lastFilterStart + _lastFilterLength;
+        var validStart = startRel >= _lastFilterStart + _lastFilterLength;      // filters must not overlap (0/0 = none yet)
         if (length < 4 || length > MaxFilterLength || !validStart || length > (_dictionary >> 1))
             throw new ArchiveException("Invalid RAR filter.");
         if (_filters.Count >= MaxPendingFilters) throw new ArchiveException("Too many pending RAR filters.");

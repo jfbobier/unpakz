@@ -312,10 +312,12 @@ public sealed class Rar5Archive : IArchive
                     var earlier = _files[members[_decoderNext]];
                     CheckSupported(Entries[members[_decoderNext]]);
                     _decoder.Decode(PackedFor(earlier), earlier.UnpackedSize, solid: _decoderNext > 0, NullSink.Instance);
+                    Stats.FilesDecoded++;
                     _decoderNext++;
                 }
 
                 _decoder.Decode(PackedFor(f), f.UnpackedSize, solid: f.GroupIndex > 0, verify);
+                Stats.FilesDecoded++;
                 _decoderNext = f.GroupIndex + 1;
             }
             catch

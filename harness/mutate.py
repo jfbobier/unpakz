@@ -21,9 +21,16 @@ atexit.register(restore)
 for sig in (signal.SIGINT, signal.SIGTERM):
     signal.signal(sig, lambda *_: sys.exit(130))
 
+TIMEOUT = 240   # seconds; a mutant that makes the code hang is detected, not stuck forever
+
+
 def run_tests():
-    p = subprocess.run(["dotnet", "test", "--nologo", "-v", "q"], cwd=ROOT, capture_output=True, text=True,
-                       env={**os.environ, "UNPAKZ_REQUIRE_ORACLE": "1"})
+    try:
+        p = subprocess.run(["dotnet", "test", "-c", "Release", "--nologo", "-v", "q"], cwd=ROOT, capture_output=True, text=True,
+                           env={**os.environ, "UNPAKZ_REQUIRE_ORACLE": "1"}, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        subprocess.run(["pkill", "-f", "testhost"], check=False)
+        return 1, False
     out = p.stdout + p.stderr
     compile_error = " error CS" in out or " error CA" in out or " error xUnit" in out or " error IDE" in out
     return p.returncode, compile_error
