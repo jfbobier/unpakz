@@ -90,5 +90,5 @@ dotnet publish src/Unpakz.App -c Release -r win-x64 --no-self-contained
 
 ## Credits and licence
 
-MIT, © 2026 Jean-Francois Bobier — see [LICENSE](LICENSE). The RAR 5 compression algorithm was implemented following libarchive's BSD-2
+BSD-2-Clause, © 2026 Jean-Francois Bobier — see [LICENSE](LICENSE). The RAR 5 compression algorithm was implemented following libarchive's BSD-2
 reader (credited in [docs/THIRD-PARTY.md](docs/THIRD-PARTY.md)); no RARLAB or 7-Zip RAR source was used.

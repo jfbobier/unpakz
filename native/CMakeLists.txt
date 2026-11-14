@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.20)
+project(unpakz_native C CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# libarchive, vendored read side only (see docs/decisions/0003, 0004 and docs/THIRD-PARTY.md). Only the library is built.
+set(ENABLE_TAR OFF CACHE BOOL "" FORCE)
+set(ENABLE_CPIO OFF CACHE BOOL "" FORCE)
+set(ENABLE_CAT OFF CACHE BOOL "" FORCE)
+set(ENABLE_UNZIP OFF CACHE BOOL "" FORCE)
+set(ENABLE_TEST OFF CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+foreach(opt OPENSSL NETTLE MBEDTLS XML2 EXPAT LIBXML2 ICONV LZ4 LZO LIBB2 BZip2 LibGCC ZSTD LZMA CNG ACL XATTR)
+  set(ENABLE_${opt} OFF CACHE BOOL "" FORCE)
+endforeach()
+add_subdirectory(${CMAKE_SOURCE_DIR}/../third_party/libarchive libarchive EXCLUDE_FROM_ALL)
+
+add_executable(smoke smoke.c)
+target_link_libraries(smoke PRIVATE archive_static)
+target_include_directories(smoke PRIVATE ${CMAKE_SOURCE_DIR}/../third_party/libarchive/libarchive)
+target_compile_definitions(smoke PRIVATE LIBARCHIVE_STATIC)
