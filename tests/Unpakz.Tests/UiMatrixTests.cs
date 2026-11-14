@@ -140,6 +140,38 @@ public sealed class UiMatrixTests : IDisposable
         if (format.Contains("volume", StringComparison.Ordinal)) Assert.Contains("parts", vm.Summary, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [MemberData(nameof(Formats))]
+    public void Details_describe_the_archive_without_repeating_its_name(string format)
+    {
+        using var vm = Open(Get(format), new FakePicker(null));
+        Assert.DoesNotContain(Path.GetFileName(vm.ArchivePath!), vm.Details, StringComparison.Ordinal);
+        Assert.Contains(vm.Source!.Archive.Format.ToUpperInvariant(), vm.Details, StringComparison.Ordinal);
+        Assert.StartsWith(Path.GetFileName(vm.ArchivePath!), vm.Summary, StringComparison.Ordinal);
+        Assert.EndsWith(vm.Details, vm.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_status_says_extracting_while_working_not_ready()
+    {
+        var dir = Path.Combine(_root, "stat");
+        Directory.CreateDirectory(dir);
+        var b = new ZipBuilder();
+        for (var i = 0; i < 10; i++) b.Add($"f{i}.bin", TestData.Random(200_000, i));
+        File.WriteAllBytes(Path.Combine(dir, "s.zip"), b.Build());
+        using var vm = new MainViewModel(new FakePicker(Path.Combine(_root, "stat-out")), new FakePrompt(false));
+        Assert.True(vm.TryOpen(Path.Combine(dir, "s.zip")));
+        Assert.Equal("Ready.", vm.Status);
+
+        var duringWork = new List<string>();
+        vm.Changed += name => { if (name == nameof(MainViewModel.Progress) && vm.IsBusy) duringWork.Add(vm.Status); };
+        await vm.ExtractAllAsync();
+
+        Assert.NotEmpty(duringWork);
+        Assert.All(duringWork, s => Assert.Contains("Extracting", s, StringComparison.Ordinal));
+        Assert.DoesNotContain("Extracting", vm.Status, StringComparison.Ordinal);       // replaced by the result when done
+    }
+
     // ---- Extract all... (folder picker) ----
     [Theory]
     [MemberData(nameof(Formats))]
@@ -290,6 +322,44 @@ public sealed class UiMatrixTests : IDisposable
         Assert.Equal(1, prompt.Asked);
         Assert.Equal(Expected(c.Tree), Snapshot(dest));
         Assert.Equal(RunStatus.Success, vm.LastStatus);
+    }
+
+    // ---- threading: dialogs belong to the UI thread ----
+    private sealed class ThreadTaggedContext : SynchronizationContext
+    {
+        public int Sends { get; private set; }
+        public override void Send(SendOrPostCallback d, object? state) { Sends++; d(state); }
+        public override void Post(SendOrPostCallback d, object? state) => ThreadPool.QueueUserWorkItem(_ => d(state));
+    }
+
+    private sealed class RecordingPrompt(ThreadTaggedContext ctx) : IPrompt
+    {
+        public int SendsAtPrompt { get; private set; } = -1;
+        public bool ConfirmReplace(string message) { SendsAtPrompt = ctx.Sends; return true; }
+    }
+
+    [Fact]
+    public async Task The_replace_prompt_is_shown_through_the_callers_synchronization_context()
+    {
+        var c = Get("zip");
+        var dest = Path.Combine(_root, "ctx");
+        Directory.CreateDirectory(dest);
+        File.WriteAllText(Path.Combine(dest, "readme.txt"), "MINE");
+        var ctx = new ThreadTaggedContext();
+        var prompt = new RecordingPrompt(ctx);
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(ctx);
+        try
+        {
+            using var vm = Open(c, new FakePicker(dest), prompt);
+            await vm.ExtractAllAsync();
+            Assert.True(prompt.SendsAtPrompt >= 1, "the prompt must be marshalled to the UI context, not run on a worker thread");
+            Assert.Equal(RunStatus.Success, vm.LastStatus);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
     }
 
     // ---- failure modes ----

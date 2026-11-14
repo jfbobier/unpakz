@@ -1,0 +1,4 @@
+# This project implements COM interfaces (IDataObject, IStream). A COM server reports failures to its caller as HRESULTs,
+# and COMException is the only way to choose the HRESULT, so CA2201 ("reserved exception type") does not apply here.
+[*.cs]
+dotnet_diagnostic.CA2201.severity = none

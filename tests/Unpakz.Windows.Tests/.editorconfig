@@ -1,0 +1,4 @@
+# These tests talk to the drag source through the COM interfaces (IDataObject / IStream) on purpose, exactly as Explorer does,
+# so "use the concrete type" (CA1859) would defeat the point.
+[*.cs]
+dotnet_diagnostic.CA1859.severity = none

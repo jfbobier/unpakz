@@ -19,13 +19,15 @@ public sealed class MainViewModel : IDisposable
     private readonly IFolderPicker _picker;
     private readonly IPrompt _prompt;
     private readonly Func<string, ArchiveSource> _opener;
+    private readonly IFileSystem? _fileSystem;
     private CancellationTokenSource? _cts;
     private string _status = "Open or drop a .zip or .rar file.";
     private double _progress;
     private bool _busy;
 
-    public MainViewModel(IFolderPicker picker, IPrompt prompt, Func<string, ArchiveSource>? opener = null)
+    public MainViewModel(IFolderPicker picker, IPrompt prompt, Func<string, ArchiveSource>? opener = null, IFileSystem? fileSystem = null)
     {
+        _fileSystem = fileSystem;
         _picker = picker ?? throw new ArgumentNullException(nameof(picker));
         _prompt = prompt ?? throw new ArgumentNullException(nameof(prompt));
         _opener = opener ?? (path => ArchiveSource.Open(path));
@@ -40,7 +42,11 @@ public sealed class MainViewModel : IDisposable
 
     public bool IsOpen => Source is not null;
 
+    /// <summary>File name, then <see cref="Details"/>.</summary>
     public string Summary { get; private set; } = string.Empty;
+
+    /// <summary>Format, number of files, size, parts: everything except the name (which the window shows on its own).</summary>
+    public string Details { get; private set; } = string.Empty;
 
     public RunStatus? LastStatus { get; private set; }
 
@@ -70,7 +76,8 @@ public sealed class MainViewModel : IDisposable
             var source = _opener(path);
             Source = source;
             ArchivePath = Path.GetFullPath(path);
-            Summary = Describe(source, ArchivePath);
+            Details = Describe(source);
+            Summary = Path.GetFileName(ArchivePath) + " · " + Details;
             LastStatus = null;
             Status = "Ready.";
             Changed?.Invoke(nameof(Summary));
@@ -85,12 +92,12 @@ public sealed class MainViewModel : IDisposable
         }
     }
 
-    private static string Describe(ArchiveSource source, string path)
+    private static string Describe(ArchiveSource source)
     {
         var inv = CultureInfo.InvariantCulture;
         var files = source.Archive.Entries.Count(e => e.Kind == EntryKind.File);
         var size = source.VolumePaths.Sum(p => new FileInfo(p).Length);
-        var text = string.Create(inv, $"{Path.GetFileName(path)} · {source.Archive.Format.ToUpperInvariant()} · {files} files · {FormatSize(size)}");
+        var text = string.Create(inv, $"{source.Archive.Format.ToUpperInvariant()} · {files} files · {FormatSize(size)}");
         if (source.VolumePaths.Count > 1) text += string.Create(inv, $" · {source.VolumePaths.Count} parts");
         return text;
     }
@@ -136,19 +143,21 @@ public sealed class MainViewModel : IDisposable
     private async Task RunAsync(string destination, IReadOnlyCollection<int>? selection)
     {
         if (!IsOpen || IsBusy) return;
+        var context = SynchronizationContext.Current;      // dialogs must be shown on the thread that started the operation
         IsBusy = true;
+        Status = "Extracting…";                  // before the first progress event, so no listener sees "Ready." while busy
         Progress = 0;
         _cts = new CancellationTokenSource();
         try
         {
             var progress = new ImmediateProgress<ExtractionProgress>(p => Progress = p.TotalBytes > 0 ? Math.Min(1.0, (double)p.BytesWritten / p.TotalBytes) : 0);
-            var outcome = await ExtractionRunner.RunAsync(Source!.Archive, destination, selection, null, progress, null, _cts.Token).ConfigureAwait(false);
+            var outcome = await ExtractionRunner.RunAsync(Source!.Archive, destination, selection, null, progress, _fileSystem, _cts.Token).ConfigureAwait(false);
 
             if (outcome.Status == RunStatus.Failed && outcome.Error == ArchiveError.Conflict
-                && _prompt.ConfirmReplace($"Some files already exist in {destination}. Replace them?"))
+                && Ask(context, $"Some files already exist in {destination}. Replace them?"))
             {
                 Progress = 0;
-                outcome = await ExtractionRunner.RunAsync(Source.Archive, destination, selection, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite }, progress, null, _cts.Token).ConfigureAwait(false);
+                outcome = await ExtractionRunner.RunAsync(Source.Archive, destination, selection, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite }, progress, _fileSystem, _cts.Token).ConfigureAwait(false);
             }
 
             if (outcome.Status == RunStatus.Success) Progress = 1;
@@ -161,6 +170,14 @@ public sealed class MainViewModel : IDisposable
             _cts = null;
             IsBusy = false;
         }
+    }
+
+    private bool Ask(SynchronizationContext? context, string message)
+    {
+        if (context is null) return _prompt.ConfirmReplace(message);
+        var answer = false;
+        context.Send(_ => answer = _prompt.ConfirmReplace(message), null);
+        return answer;
     }
 
     public void Cancel() => _cts?.Cancel();
@@ -195,6 +212,7 @@ public sealed class MainViewModel : IDisposable
         Source = null;
         ArchivePath = null;
         Summary = string.Empty;
+        Details = string.Empty;
     }
 
     public void Dispose()
