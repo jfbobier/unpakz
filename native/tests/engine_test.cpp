@@ -1,4 +1,5 @@
 // Executable spec for the extraction engine (security, single-write, limits, formats). Mirrors the C# ArchiveExtractorTests.
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
@@ -112,6 +113,7 @@ TEST(symlinks_and_hardlinks_are_skipped_and_never_created) {
     CHECK(fs.links.empty());
     CHECK_EQ(r.skipped.size(), 2u);
     CHECK(r.skipped[0].reason == SkipReason::Link);
+    CHECK(r.skipped[1].reason == SkipReason::Link);       // a hard link is a link, not a special file
 }
 
 TEST(existing_files_follow_the_overwrite_policy_and_preflight_refuses_up_front) {
@@ -181,9 +183,9 @@ TEST(limits_are_enforced_before_writing) {
     auto zip = make_zip({file("a", "12345"), file("b", "12345"), file("c", "12345")});
     { MemoryFs fs; Options o; o.limits.max_entries = 2; CHECK(throws(Status::LimitExceeded, [&] { run(zip, fs, o); })); CHECK_EQ(fs.bytes_written, 0u); }
     { MemoryFs fs; Options o; o.limits.max_entries = 3; run(zip, fs, o); CHECK_EQ(fs.final_file_count(), 3u); }
-    { MemoryFs fs; Options o; o.limits.max_entry_size = 4; CHECK(throws(Status::LimitExceeded, [&] { run(zip, fs, o); })); CHECK_EQ(fs.bytes_written, 0u); }
+    { MemoryFs fs; Options o; o.limits.max_entry_size = 4; CHECK(throws(Status::LimitExceeded, [&] { run(zip, fs, o); })); CHECK_EQ(fs.bytes_written, 0u); CHECK(fs.temp_files.empty()); }
     { MemoryFs fs; Options o; o.limits.max_entry_size = 5; run(zip, fs, o); }
-    { MemoryFs fs; Options o; o.limits.max_total_size = 14; CHECK(throws(Status::LimitExceeded, [&] { run(zip, fs, o); })); CHECK_EQ(fs.bytes_written, 0u); }
+    { MemoryFs fs; Options o; o.limits.max_total_size = 14; CHECK(throws(Status::LimitExceeded, [&] { run(zip, fs, o); })); CHECK_EQ(fs.bytes_written, 0u); CHECK(fs.temp_files.empty()); }
     { MemoryFs fs; Options o; o.limits.max_total_size = 15; run(zip, fs, o); }
 }
 
@@ -349,6 +351,131 @@ TEST(garbage_is_unsupported_or_corrupt_not_a_crash) {
     std::vector<std::uint8_t> empty;
     try { run(empty, fs); CHECK(false); }
     catch (const Error& e) { CHECK(e.status() == Status::Unsupported || e.status() == Status::Corrupt); }
+}
+
+TEST(special_files_are_skipped_and_never_created) {
+    Ent fifo; fifo.name = "pipe"; fifo.type = AE_IFIFO;
+    MemoryFs fs;
+    auto r = run(make_targz({file("a.txt", "x"), fifo}), fs);
+    CHECK(!fs.has_file(P("pipe")) && fs.has_file(P("a.txt")));
+    CHECK_EQ(r.skipped.size(), 1u);
+    CHECK(r.skipped[0].reason == SkipReason::Special);
+}
+
+TEST(a_directory_after_a_file_of_the_same_name_is_a_conflict) {
+    MemoryFs fs;
+    CHECK(throws(Status::Conflict, [&] { run(make_targz({file("x", "1"), dir("x")}), fs); }));
+    CHECK_EQ(fs.bytes_written, 0u);
+}
+
+TEST(preflight_finds_a_file_or_link_in_the_way_before_writing_anything) {
+    auto zip = make_zip({file("first.txt", "1"), file("sub/b.txt", "2")});
+    {   MemoryFs fs; fs.dirs.insert(fold(kDest)); fs.put_file(P("sub"), {'f'});
+        CHECK(throws(Status::Conflict, [&] { run(zip, fs); })); CHECK_EQ(fs.bytes_written, 0u); CHECK(fs.temp_files.empty()); }
+    {   MemoryFs fs; fs.dirs.insert(fold(kDest)); fs.dirs.insert(fold(P("sub"))); fs.links.insert(fold(P("sub")));
+        CHECK(throws(Status::Conflict, [&] { run(zip, fs); })); CHECK_EQ(fs.bytes_written, 0u); CHECK(fs.temp_files.empty()); }
+}
+
+TEST(a_directory_that_appears_after_the_preflight_is_refused_at_write_time) {
+    MemoryFs fs;
+    fs.on_create_file = [&](const std::u16string& f) { if (f == P("a.txt")) fs.dirs.insert(fold(P("b.txt"))); };
+    Options o; o.overwrite = OverwritePolicy::Overwrite;
+    CHECK(throws(Status::Conflict, [&] { run(make_zip({file("a.txt", "1"), file("b.txt", "2")}), fs, o); }));
+    for (auto& t : fs.temp_files) CHECK(t.second != P("b.txt"));
+}
+
+TEST(an_archive_that_loses_entries_between_the_passes_is_refused) {
+    namespace fsys = std::filesystem;
+    auto dir = fsys::temp_directory_path() / "unpakz-toctou2";
+    fsys::create_directories(dir);
+    auto path = dir / "a.zip";
+    auto write = [&](const std::vector<std::uint8_t>& b) { auto tmp = path; tmp += ".new"; { std::ofstream f(tmp, std::ios::binary); f.write(reinterpret_cast<const char*>(b.data()), static_cast<std::streamsize>(b.size())); } fsys::rename(tmp, path); };
+    write(make_zip({file("a.txt", "one"), file("b.txt", "two")}));
+    MemoryFs fs; Options o; o.file_system = &fs;
+    int calls = 0;
+    o.filter = [&](const EntryInfo&) { if (++calls == 2) write(make_zip({file("a.txt", "one")})); return true; };
+    bool refused = false;
+    try { extract_archive(ArchiveSource::from_file(path.u16string()), kDest, o); } catch (const Error& e) { refused = e.status() == Status::Corrupt; }
+    CHECK(refused);
+    fsys::remove_all(dir);
+}
+
+TEST(a_destination_that_is_itself_a_link_is_allowed_and_not_recreated) {
+    MemoryFs fs; fs.dirs.insert(fold(kDest)); fs.links.insert(fold(kDest));
+    run(make_zip({file("a.txt", "x")}), fs);
+    CHECK(fs.has_file(P("a.txt")));
+    CHECK(fs.create_dir_calls.empty());
+}
+
+TEST(a_destination_that_is_a_file_is_reported_as_such) {
+    MemoryFs fs; fs.put_file(kDest, {'x'});
+    try { run(make_zip({file("a", "1")}), fs); CHECK(false); }
+    catch (const Error& e) { CHECK(e.status() == Status::Conflict); CHECK(std::string(e.what()).find("destination is a file") != std::string::npos); }
+}
+
+TEST(an_empty_destination_is_refused_and_nothing_is_written) {
+    MemoryFs fs;
+    auto bytes = make_zip({file("a", "1")});
+    Options o; o.file_system = &fs;
+    CHECK(throws(Status::InvalidArgument, [&] { extract_archive(ArchiveSource::from_memory(bytes.data(), bytes.size()), u"", o); }));
+    CHECK_EQ(fs.bytes_written, 0u);
+}
+
+TEST(files_are_presized_only_when_the_declared_size_is_modest) {
+    MemoryFs fs; fs.discard_data = true;
+    run(make_zip({file("small", txt(1234))}), fs);
+    CHECK_EQ(fs.preallocations.size(), 1u);
+    CHECK_EQ(fs.preallocations[0], 1234u);
+    MemoryFs big; big.discard_data = true;
+    Ent huge = file("huge", std::string(300u << 20, '\0'));      // 300 MiB of zeros: tiny once deflated, over the pre-size limit
+    run(make_zip({huge}), big);
+    CHECK_EQ(big.preallocations[0], 0u);
+    CHECK_EQ(big.bytes_written, 300ull << 20);
+}
+
+TEST(list_enforces_the_entry_limit) {
+    auto bytes = make_zip({file("a", "1"), file("b", "2"), file("c", "3")});
+    Limits l; l.max_entries = 2;
+    CHECK(throws(Status::LimitExceeded, [&] { list_archive(ArchiveSource::from_memory(bytes.data(), bytes.size()), l); }));
+    l.max_entries = 3;
+    CHECK_EQ(list_archive(ArchiveSource::from_memory(bytes.data(), bytes.size()), l).size(), 3u);
+}
+
+TEST(lying_central_directory_sizes_never_produce_wrong_data) {
+    // Whatever libarchive does with sizes that disagree with the data, the result must be a typed error or the exact original bytes.
+    std::string data = txt(5000, 7);
+    auto zip = make_zip({file("a.txt", data)}, false);
+    std::size_t cd = 0;
+    for (std::size_t i = 0; i + 4 < zip.size(); ++i) if (zip[i] == 0x50 && zip[i + 1] == 0x4b && zip[i + 2] == 1 && zip[i + 3] == 2) cd = i;
+    CHECK(cd != 0);
+    for (auto [csz, usz] : std::vector<std::pair<std::uint32_t, std::uint32_t>>{{100, 100}, {5000, 100}, {100, 5000}, {9000, 9000}, {5000, 9000}, {5000, 0}, {0, 5000}, {0xFFFFFFFFu, 0xFFFFFFFFu}}) {
+        auto z = zip;
+        auto put = [&](std::size_t off, std::uint32_t v) { for (int k = 0; k < 4; k++) z[off + k] = static_cast<std::uint8_t>((v >> (8 * k)) & 0xff); };
+        put(cd + 20, csz); put(cd + 24, usz);
+        MemoryFs fs;
+        try {
+            run(z, fs);
+            CHECK(false);                                              // every one of these lies about the data
+        } catch (const Error& e) {
+            CHECK(e.status() == Status::Corrupt);
+            if (csz == 0 && usz == 5000) CHECK(std::string(e.what()).find("shorter than its header declares") != std::string::npos);   // our own check, not libarchive's
+        }
+        CHECK(!fs.has_file(P("a.txt")));
+        CHECK(fs.leftover_temps().empty());
+    }
+}
+
+TEST(zip64_entries_larger_than_4_gib_extract_completely) {
+    // Opt-in (several seconds, builds a 5 GiB entry of zeros): UNPAKZ_BIG=1. Proves there is no 2 GiB / 4 GiB limit anywhere.
+    if (!std::getenv("UNPAKZ_BIG")) return;
+    const std::uint64_t size = 5ull << 30;
+    auto zip = make_zip_huge("huge.bin", size);
+    MemoryFs fs; fs.discard_data = true;
+    Options o; o.limits.max_entry_size = 1ull << 40;
+    auto r = run(zip, fs, o);
+    CHECK_EQ(fs.bytes_written, size);
+    CHECK_EQ(r.bytes, size);
+    CHECK_EQ(r.files, 1u);
 }
 
 UT_MAIN()

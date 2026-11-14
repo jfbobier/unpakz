@@ -1,8 +1,0 @@
-[ 27%] Built target zlib
-[ 94%] Built target archive_static
-[ 95%] Built target smoke
-[ 98%] Built target unpakz_core
-[100%] Built target guard_test
-[100%] Building CXX object CMakeFiles/engine_test.dir/tests/engine_test.cpp.o
-[100%] Linking CXX executable engine_test
-[100%] Built target engine_test

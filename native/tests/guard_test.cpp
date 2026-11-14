@@ -136,6 +136,10 @@ TEST(utf8_decoder_is_strict) {
     CHECK(!utf8_to_utf16("\xF8\x88\x80\x80\x80", o));                                     // 5-byte form
     CHECK(!utf8_to_utf16("\xE2\x82", o));                                                 // truncated
     CHECK(!utf8_to_utf16("\x80", o));                                                     // stray continuation
+    CHECK(!utf8_to_utf16("\xC3\x28", o));                                                // lead byte followed by a non-continuation
+    CHECK(!utf8_to_utf16("\xE2\x28\xA1", o));
+    CHECK(!utf8_to_utf16("\xF0\x28\x8C\xBC", o));
+    CHECK(!utf8_to_utf16("\xF5\x80\x80\x80", o));                                       // lead byte beyond F4
     CHECK(utf8_to_utf16(std::string_view("a\0b", 3), o)); CHECK_EQ(o.size(), 3u);         // NUL passes through to the guard
     CHECK_EQ(utf16_to_utf8(U("h\xC3\xA9llo\xF0\x9F\x98\x80")), std::string("h\xC3\xA9llo\xF0\x9F\x98\x80"));
 }

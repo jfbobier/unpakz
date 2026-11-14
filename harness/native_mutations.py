@@ -7,7 +7,7 @@ MUTANTS = [
     # --- guard: traversal / rooted
     ("NG1", GD, 'if (seg == u"..") return fail(PathRejection::Traversal);', ''),
     ("NG2", GD, 'if (is_sep(name[0])) return fail(PathRejection::Rooted);', ''),
-    ("NG3", GD, 'name.size() >= 2 && is_ascii_letter(name[0]) && name[1] == u\':\'', 'false'),
+    ("NG3", GD, "name.size() >= 2 && is_ascii_letter(name[0]) && name[1] == u':'", "name.size() >= 2 && is_ascii_letter(name[0]) && name[1] == u':' && false"),
     ("NG4", GD, "c == u':' || ", ''),
     ("NG5", GD, "c < u' ' || ", "c < u'\\x01' || "),
     ("NG6", GD, "c == 0x7F || ", ''),
@@ -17,14 +17,14 @@ MUTANTS = [
     ("NG10", GD, "c == u'|' || ", ''),
     ("NG11", GD, "c == u'?' || ", ''),
     ("NG12", GD, "|| c == u'*')", ")"),
-    ("NG13", GD, "if (is_reserved_device_name(seg)) return PathRejection::ReservedName;", ''),
+    ("NG13", GD, "if (is_reserved_device_name(seg)) return PathRejection::ReservedName;", "if (is_reserved_device_name(seg) && false) return PathRejection::ReservedName;"),
     ("NG14", GD, "if (seg.back() == u'.' || seg.back() == u' ') return PathRejection::TrailingDotOrSpace;", "if (seg.back() == u'.') return PathRejection::TrailingDotOrSpace;"),
     ("NG15", GD, "if (seg.back() == u'.' || seg.back() == u' ') return PathRejection::TrailingDotOrSpace;", "if (seg.back() == u' ') return PathRejection::TrailingDotOrSpace;"),
     ("NG16", GD, "seg.size() > o.max_segment_length", "seg.size() >= o.max_segment_length"),
     ("NG17", GD, "++depth > options.max_depth", "++depth >= options.max_depth"),
     ("NG18", GD, "result.size() > options.max_path_length", "result.size() >= options.max_path_length"),
     ("NG19", GD, 'if (seg.empty() || seg == u".") continue;', 'if (seg.empty()) continue;'),
-    ("NG20", GD, "auto stem = dot == std::u16string_view::npos ? seg : seg.substr(0, dot);", "auto stem = seg;"),
+    ("NG20", GD, "auto stem = dot == std::u16string_view::npos ? seg : seg.substr(0, dot);", "auto stem = dot == std::u16string_view::npos ? seg : seg;"),
     ("NG21", GD, "while (!stem.empty() && stem.back() == u' ') stem.remove_suffix(1);", ""),
     ("NG22", GD, "(d >= u'1' && d <= u'9')", "(d >= u'1' && d <= u'8')"),
     ("NG23", GD, "|| d == 0x00B9 || d == 0x00B2 || d == 0x00B3", "|| d == 0x00B2 || d == 0x00B3"),
@@ -86,5 +86,13 @@ MUTANTS = [
 
 # Mutants that cannot change observable behaviour, with the reason. Everything else that survives is a test gap.
 EQUIVALENT = {
+    "NG37": "lead bytes F5..F7 would decode to code points >= 0x140000, which the U+10FFFF range check rejects anyway",
+    "NE24": "no libarchive reader in our format set returns ARCHIVE_WARN from a data block (CRC errors are FAILED/FATAL); the strict check is kept deliberately",
+    "NE26": "libarchive itself refuses data beyond the declared size ('larger than the declared entry size'); our check is defence in depth",
+    "NE33": "libarchive never returns data blocks out of order for the supported formats; defence in depth against sparse-file handling bugs",
+    "NE35": "libarchive never reports a negative size for the supported formats; defence in depth",
+    "NE36": "the placeholder text for an undecodable name contains '<' and '>', which the guard rejects anyway; the flag is a second statement of the same refusal",
+    "NE22": "actual-size limits behind the declared-size limits: libarchive stops at the declared size, so the declared check always fires first; kept for readers that do not declare sizes",
+    "NE23": "same as NE22 for the total size",
     "NE10": "unreachable overflow guard: declared_total_ is bounded by max_total_size (<= 2^64-1) after each add, and sizes are non-negative int64 from libarchive",
 }

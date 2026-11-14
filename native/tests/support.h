@@ -60,6 +60,9 @@ public:
     std::vector<std::pair<std::u16string, std::u16string>> temp_files;   // temp, final
     std::map<std::u16string, std::optional<Timestamp>> mtimes;   // folded path -> mtime given at commit
     std::map<std::u16string, bool> overwrite_flags;
+    std::vector<std::uint64_t> preallocations;
+    std::vector<std::u16string> create_dir_calls;
+    bool discard_data = false;   // count bytes but do not keep them (huge-entry tests)
     std::uint64_t bytes_written = 0;
     int commits = 0;
     std::function<void(const std::u16string&)> on_create_file;   // fired when a writer is created (race injection)
@@ -88,6 +91,7 @@ public:
     }
 
     void create_directory(const std::u16string& path) override {
+        create_dir_calls.push_back(path);
         auto k = fold(path);
         auto sep = k.find_last_of(u"/\\");
         if (sep == std::u16string::npos || !dirs.count(k.substr(0, sep == 0 ? 1 : sep))) throw Error(Status::Io, "parent directory missing");
@@ -103,8 +107,10 @@ public:
     MemWriter(MemoryFs& fs, std::u16string temp, std::u16string final_path) : fs_(fs), temp_(std::move(temp)), final_(std::move(final_path)) {}
     ~MemWriter() override { if (!committed_) fs_.files.erase(fold(temp_)); }
     void write(const std::uint8_t* d, std::size_t n) override {
-        auto& v = fs_.files[fold(temp_)];
-        v.insert(v.end(), d, d + n);
+        if (!fs_.discard_data) {
+            auto& v = fs_.files[fold(temp_)];
+            v.insert(v.end(), d, d + n);
+        }
         fs_.bytes_written += n;
     }
     void commit(std::optional<Timestamp> mtime, bool overwrite) override {
@@ -127,7 +133,8 @@ private:
     bool committed_ = false;
 };
 
-inline std::unique_ptr<IFileWriter> MemoryFs::create_file(const std::u16string& final_path, std::uint64_t) {
+inline std::unique_ptr<IFileWriter> MemoryFs::create_file(const std::u16string& final_path, std::uint64_t preallocate) {
+    preallocations.push_back(preallocate);
     auto sep = final_path.find_last_of(u"/\\");
     auto dir = final_path.substr(0, sep == 0 ? 1 : sep);
     if (!dirs.count(fold(dir))) throw Error(Status::Io, "directory missing");
@@ -191,6 +198,31 @@ inline std::vector<std::uint8_t> build(const std::vector<Ent>& ents, bool zip, b
 }
 inline std::vector<std::uint8_t> make_zip(const std::vector<Ent>& e, bool deflate = true) { return build(e, true, deflate); }
 inline std::vector<std::uint8_t> make_targz(const std::vector<Ent>& e) { return build(e, false); }
+
+// One huge entry of zeros streamed through the zip writer (zip64 is switched on by libarchive when the size needs it).
+inline std::vector<std::uint8_t> make_zip_huge(const std::string& name, std::uint64_t size) {
+    WriteCtx ctx;
+    struct archive* a = archive_write_new();
+    archive_write_set_format_zip(a);
+    archive_write_set_options(a, "zip:compression=deflate");
+    archive_write_open2(a, &ctx, nullptr, write_cb, nullptr, nullptr);
+    struct archive_entry* en = archive_entry_new();
+    archive_entry_set_pathname(en, name.c_str());
+    archive_entry_set_filetype(en, AE_IFREG);
+    archive_entry_set_perm(en, 0644);
+    archive_entry_set_size(en, static_cast<la_int64_t>(size));
+    if (archive_write_header(a, en) != ARCHIVE_OK) throw std::runtime_error(archive_error_string(a));
+    std::vector<char> zeros(1 << 20, 0);
+    for (std::uint64_t left = size; left > 0;) {
+        auto n = static_cast<std::size_t>(std::min<std::uint64_t>(left, zeros.size()));
+        archive_write_data(a, zeros.data(), n);
+        left -= n;
+    }
+    archive_entry_free(en);
+    archive_write_close(a);
+    archive_write_free(a);
+    return ctx.out;
+}
 
 inline std::string rnd(std::size_t n, unsigned seed = 1) {
     std::mt19937 g(seed);
