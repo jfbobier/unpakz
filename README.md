@@ -49,11 +49,11 @@ Exit codes: 0 ok, 1 error (message explains), 2 usage, 130 cancelled.
 
 The verification harness is the main deliverable. See **[HARNESS.md](HARNESS.md)** for commands, layers and the mutation harness.
 
-* ~670 automated tests (Linux and Windows) plus ~150 Windows-only tests: COM data object, registry, and a UI matrix (6 window states ×
+* 676 automated tests (Linux and Windows) plus 153 Windows-only tests: COM data object, registry, and a UI matrix (6 window states ×
   4 font scales × 3 sizes with screenshots, real button clicks over 6 archive formats).
 * Outputs are compared with 7-Zip and with RARLAB's `rar` / `unrar` (stored, methods 1-5, solid, forced filters, multi-volume).
-* ~370 mutations of the code are applied one at a time; each must make a test fail (survivors are listed with reasons in
-  [docs/STATUS.md](docs/STATUS.md)).
+* 372 mutations of the code are applied one at a time; each must make a test fail (the few justified equivalents and the caveats are
+  listed in [docs/STATUS.md](docs/STATUS.md)).
 * Corruption sweeps flip every byte and truncate at every length of real archives: the result must be an `ArchiveException` or the
   original bytes, never silently wrong data.
 
