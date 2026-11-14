@@ -1,7 +1,24 @@
 cmake_minimum_required(VERSION 3.20)
 project(unpakz_native C CXX)
+
+option(UNPAKZ_SANITIZE "Build everything with AddressSanitizer and UBSan (Linux/clang/gcc)" OFF)
+if(UNPAKZ_SANITIZE AND NOT MSVC)
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
+  add_link_options(-fsanitize=address,undefined)
+endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# zlib-ng (zlib licence), vendored, built in zlib-compatible mode; libarchive uses it for gzip and ZIP deflate.
+set(ZLIB_COMPAT ON CACHE BOOL "" FORCE)
+set(ZLIB_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(WITH_GTEST OFF CACHE BOOL "" FORCE)
+set(WITH_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/../third_party/zlib-ng zlib-ng EXCLUDE_FROM_ALL)
+set(ZLIB_INCLUDE_DIR ${CMAKE_BINARY_DIR}/zlib-ng CACHE PATH "" FORCE)
+set(ZLIB_LIBRARY zlibstatic CACHE STRING "" FORCE)
+set(ZLIB_FOUND TRUE CACHE BOOL "" FORCE)
 
 # libarchive, vendored read side only (see docs/decisions/0003, 0004 and docs/THIRD-PARTY.md). Only the library is built.
 set(ENABLE_TAR OFF CACHE BOOL "" FORCE)
@@ -20,3 +37,24 @@ add_executable(smoke smoke.c)
 target_link_libraries(smoke PRIVATE archive_static)
 target_include_directories(smoke PRIVATE ${CMAKE_SOURCE_DIR}/../third_party/libarchive/libarchive)
 target_compile_definitions(smoke PRIVATE LIBARCHIVE_STATIC)
+
+# ---- our code ----
+enable_testing()
+add_library(unpakz_core STATIC src/guard.cpp src/engine.cpp src/source.cpp src/fs_native.cpp)
+target_include_directories(unpakz_core PUBLIC src include)
+target_link_libraries(unpakz_core PUBLIC archive_static)
+target_include_directories(unpakz_core SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/../third_party/libarchive/libarchive)
+target_compile_definitions(unpakz_core PUBLIC LIBARCHIVE_STATIC)
+if(MSVC)
+  target_compile_options(unpakz_core PRIVATE /W4 /WX /permissive- /utf-8)
+else()
+  target_compile_options(unpakz_core PRIVATE -Wall -Wextra -Wpedantic -Werror -Wconversion -Wshadow)
+endif()
+
+add_executable(guard_test tests/guard_test.cpp)
+target_link_libraries(guard_test PRIVATE unpakz_core)
+add_test(NAME guard_test COMMAND guard_test)
+
+add_executable(engine_test tests/engine_test.cpp)
+target_link_libraries(engine_test PRIVATE unpakz_core)
+add_test(NAME engine_test COMMAND engine_test)

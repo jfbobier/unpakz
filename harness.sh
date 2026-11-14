@@ -9,10 +9,13 @@ case "$mode" in
     dotnet build Unpakz.slnx -c Release --nologo -v q -warnaserror
     dotnet test Unpakz.slnx -c Release --nologo --no-build -v q
     ;;
+  native)
+    scripts/native-test.sh
+    ;;
   full)
     "$0" fast
     python3 harness/mutate.py        # ~15 min: every guard must be killed by a test
     echo "full: fuzz-smoke stage not implemented yet"
     ;;
-  *) echo "usage: $0 fast|full" >&2; exit 2 ;;
+  *) echo "usage: $0 fast|native|full" >&2; exit 2 ;;
 esac

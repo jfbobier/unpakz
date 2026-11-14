@@ -7,7 +7,10 @@ in EQUIVALENT with a reason. Source files are always restored (also on Ctrl-C / 
 """
 import atexit, os, signal, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mutations import MUTANTS, EQUIVALENT
+if os.environ.get("UNPAKZ_MUTATE_MODE") == "native":
+    from native_mutations import MUTANTS, EQUIVALENT
+else:
+    from mutations import MUTANTS, EQUIVALENT
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 originals = {}
@@ -28,7 +31,10 @@ WIN_FILTER = os.environ.get("UNPAKZ_MUTATE_WIN_FILTER", "FullyQualifiedName~Data
 
 def run_tests():
     """Returns (verdict, output). Verdicts: killed, survived, invalid, hang. Anything else is an infrastructure failure and aborts the run."""
-    if MODE == "windows":
+    if MODE == "native":
+        cmd = ["bash", "scripts/native-test.sh"]
+        limit = TIMEOUT * 2
+    elif MODE == "windows":
         cmd = ["bash", "scripts/winsync.sh", ".\\scripts\\wintest-run.ps1 -Filter '%s'" % WIN_FILTER]
         limit = TIMEOUT * 2
     else:
@@ -42,6 +48,11 @@ def run_tests():
             subprocess.run(["powershell.exe", "-NoProfile", "-Command", "Get-Process testhost -ErrorAction SilentlyContinue | Stop-Process -Force"], check=False)
         return "hang", ""
     out = p.stdout + p.stderr
+    if MODE == "native":
+        if "NATIVE-BUILD-ERROR" in out: return "invalid", out
+        if "NATIVE-FAIL" in out: return "killed", out
+        if "NATIVE-PASS" in out: return "survived", out
+        return "infra", out
     if any(m in out for m in (" error CS", " error CA", " error xUnit", " error IDE", " error CS")):
         return "invalid", out
     if "Failed!" in out or "Test Run Failed" in out or "Test host process crashed" in out or "test run was aborted" in out.lower():

@@ -1,0 +1,223 @@
+// Test helpers: an in-memory IFileSystem with an operation log, and archive builders that use libarchive's *writer*
+// (the shipped DLL never writes archives, and never uses libarchive's write_disk).
+#pragma once
+#include <archive.h>
+#include <archive_entry.h>
+
+#include <clocale>
+#include <cstdint>
+#include <cstring>
+#include <map>
+#include <random>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "../src/engine.h"
+#include "../src/guard.h"
+#include "test.h"
+
+namespace tsupport {
+
+using namespace unpakz;
+
+inline std::u16string W(const char* utf8) {
+    std::u16string o;
+    if (!utf8_to_utf16(utf8, o)) throw std::runtime_error("bad utf8 in test");
+    return o;
+}
+
+inline std::u16string fold(const std::u16string& s) {
+    std::u16string r = s;
+    for (auto& c : r)
+        if (c >= u'A' && c <= u'Z') c = static_cast<char16_t>(c + 32);
+    return r;
+}
+
+#ifdef _WIN32
+inline const std::u16string kRoot = u"C:\\";
+inline const std::u16string kDest = u"C:\\dest";
+#else
+inline const std::u16string kRoot = u"/";
+inline const std::u16string kDest = u"/dest";
+#endif
+
+inline std::u16string P(const char* rel) {
+    std::u16string p = kDest;
+    p.push_back(kNativeSeparator);
+    for (auto c : W(rel)) p.push_back(c == u'/' ? kNativeSeparator : c);
+    return p;
+}
+
+// Case-insensitive, like the Windows file system the guard targets.
+class MemoryFs : public IFileSystem {
+public:
+    std::map<std::u16string, std::vector<std::uint8_t>> files;   // keyed by folded path
+    std::map<std::u16string, std::u16string> names;              // folded -> as created
+    std::set<std::u16string> dirs;
+    std::set<std::u16string> links;
+    std::vector<std::u16string> created_dirs;
+    std::vector<std::pair<std::u16string, std::u16string>> temp_files;   // temp, final
+    std::map<std::u16string, std::optional<Timestamp>> mtimes;   // folded path -> mtime given at commit
+    std::map<std::u16string, bool> overwrite_flags;
+    std::uint64_t bytes_written = 0;
+    int commits = 0;
+    std::function<void(const std::u16string&)> on_create_file;   // fired when a writer is created (race injection)
+    int temp_counter = 0;
+
+    MemoryFs() { dirs.insert(fold(kRoot)); }
+
+    void put_file(const std::u16string& path, std::vector<std::uint8_t> data) { files[fold(path)] = std::move(data); names[fold(path)] = path; }
+    bool has_file(const std::u16string& path) const { return files.count(fold(path)) != 0; }
+    const std::vector<std::uint8_t>& file(const std::u16string& path) const { return files.at(fold(path)); }
+    std::string text(const std::u16string& path) const { auto& v = file(path); return std::string(v.begin(), v.end()); }
+    std::vector<std::u16string> leftover_temps() const {
+        std::vector<std::u16string> r;
+        for (auto& [k, v] : files)
+            if (k.find(u".unpakz-") != std::u16string::npos) r.push_back(k);
+        return r;
+    }
+    std::size_t final_file_count() const { return files.size() - leftover_temps().size(); }
+
+    PathKind get_kind(const std::u16string& path) override {
+        auto k = fold(path);
+        if (links.count(k)) return PathKind::ReparsePoint;
+        if (dirs.count(k)) return PathKind::Directory;
+        if (files.count(k)) return PathKind::File;
+        return PathKind::None;
+    }
+
+    void create_directory(const std::u16string& path) override {
+        auto k = fold(path);
+        auto sep = k.find_last_of(u"/\\");
+        if (sep == std::u16string::npos || !dirs.count(k.substr(0, sep == 0 ? 1 : sep))) throw Error(Status::Io, "parent directory missing");
+        if (files.count(k)) throw Error(Status::Conflict, "a file exists at the directory path");
+        if (dirs.insert(k).second) created_dirs.push_back(path);
+    }
+
+    std::unique_ptr<IFileWriter> create_file(const std::u16string& final_path, std::uint64_t) override;
+};
+
+class MemWriter : public IFileWriter {
+public:
+    MemWriter(MemoryFs& fs, std::u16string temp, std::u16string final_path) : fs_(fs), temp_(std::move(temp)), final_(std::move(final_path)) {}
+    ~MemWriter() override { if (!committed_) fs_.files.erase(fold(temp_)); }
+    void write(const std::uint8_t* d, std::size_t n) override {
+        auto& v = fs_.files[fold(temp_)];
+        v.insert(v.end(), d, d + n);
+        fs_.bytes_written += n;
+    }
+    void commit(std::optional<Timestamp> mtime, bool overwrite) override {
+        auto fk = fold(final_);
+        fs_.mtimes[fk] = mtime;
+        fs_.overwrite_flags[fk] = overwrite;
+        if (fs_.dirs.count(fk)) throw Error(Status::Conflict, "directory at final path");
+        if (!overwrite && (fs_.files.count(fk) || fs_.links.count(fk))) throw Error(Status::Conflict, "already exists");
+        fs_.links.erase(fk);
+        fs_.files[fk] = std::move(fs_.files[fold(temp_)]);
+        fs_.files.erase(fold(temp_));
+        fs_.names[fk] = final_;
+        committed_ = true;
+        ++fs_.commits;
+    }
+
+private:
+    MemoryFs& fs_;
+    std::u16string temp_, final_;
+    bool committed_ = false;
+};
+
+inline std::unique_ptr<IFileWriter> MemoryFs::create_file(const std::u16string& final_path, std::uint64_t) {
+    auto sep = final_path.find_last_of(u"/\\");
+    auto dir = final_path.substr(0, sep == 0 ? 1 : sep);
+    if (!dirs.count(fold(dir))) throw Error(Status::Io, "directory missing");
+    std::u16string temp = dir + kNativeSeparator + u".unpakz-" + std::u16string(1, static_cast<char16_t>(u'a' + (temp_counter++ % 26))) + u".tmp";
+    temp += std::u16string(1, static_cast<char16_t>(u'0' + temp_counter % 10));
+    files[fold(temp)] = {};
+    temp_files.emplace_back(temp, final_path);
+    if (on_create_file) on_create_file(final_path);
+    return std::make_unique<MemWriter>(*this, temp, final_path);
+}
+
+// ---- archive builders ----
+struct Ent {
+    std::string name;
+    std::string data;
+    unsigned type = AE_IFREG;
+    std::string link;          // symlink / hardlink target
+    std::int64_t mtime = 1700000000;
+    bool unknown_size = false;   // zip only: stream the entry without declaring its size (data descriptor)
+};
+
+inline std::string dir_name(std::string n) { return n; }
+
+struct WriteCtx { std::vector<std::uint8_t> out; };
+inline la_ssize_t write_cb(struct archive*, void* ctx, const void* b, size_t n) {
+    auto* c = static_cast<WriteCtx*>(ctx);
+    auto* p = static_cast<const std::uint8_t*>(b);
+    c->out.insert(c->out.end(), p, p + n);
+    return static_cast<la_ssize_t>(n);
+}
+
+inline std::vector<std::uint8_t> build(const std::vector<Ent>& ents, bool zip, bool deflate = true) {
+    std::setlocale(LC_ALL, "C.UTF-8");
+    WriteCtx ctx;
+    struct archive* a = archive_write_new();
+    if (zip) {
+        archive_write_set_format_zip(a);
+        archive_write_set_options(a, deflate ? "zip:compression=deflate,hdrcharset=UTF-8" : "zip:compression=store,hdrcharset=UTF-8");
+    } else {
+        archive_write_set_format_pax_restricted(a);
+        archive_write_add_filter_gzip(a);
+        archive_write_set_options(a, "hdrcharset=UTF-8");
+    }
+    archive_write_open2(a, &ctx, nullptr, write_cb, nullptr, nullptr);
+    for (auto& e : ents) {
+        struct archive_entry* en = archive_entry_new();
+        archive_entry_set_pathname(en, e.name.c_str());
+        archive_entry_set_filetype(en, e.type);
+        archive_entry_set_perm(en, e.type == AE_IFDIR ? 0755 : 0644);
+        archive_entry_set_mtime(en, e.mtime, 0);
+        if (e.type == AE_IFLNK) archive_entry_set_symlink(en, e.link.c_str());
+        if (e.type == AE_IFREG && !e.link.empty()) { archive_entry_set_hardlink(en, e.link.c_str()); archive_entry_set_size(en, 0); }
+        else if (e.type == AE_IFREG && !e.unknown_size) archive_entry_set_size(en, static_cast<la_int64_t>(e.data.size()));
+        if (archive_write_header(a, en) != ARCHIVE_OK) throw std::runtime_error(std::string("test builder: ") + archive_error_string(a));
+        if (e.type == AE_IFREG && e.link.empty() && !e.data.empty()) archive_write_data(a, e.data.data(), e.data.size());
+        archive_entry_free(en);
+    }
+    archive_write_close(a);
+    archive_write_free(a);
+    return ctx.out;
+}
+inline std::vector<std::uint8_t> make_zip(const std::vector<Ent>& e, bool deflate = true) { return build(e, true, deflate); }
+inline std::vector<std::uint8_t> make_targz(const std::vector<Ent>& e) { return build(e, false); }
+
+inline std::string rnd(std::size_t n, unsigned seed = 1) {
+    std::mt19937 g(seed);
+    std::string s(n, '\0');
+    for (auto& c : s) c = static_cast<char>(g());
+    return s;
+}
+inline std::string txt(std::size_t n, unsigned seed = 1) {
+    std::mt19937 g(seed);
+    std::string s(n, 'a');
+    for (auto& c : s) c = static_cast<char>('a' + g() % 6);
+    return s;
+}
+inline Ent dir(const std::string& name) { Ent e; e.name = name; e.type = AE_IFDIR; return e; }
+inline Ent file(const std::string& name, const std::string& data) { Ent e; e.name = name; e.data = data; return e; }
+inline Ent symlink_to(const std::string& name, const std::string& target) { Ent e; e.name = name; e.type = AE_IFLNK; e.link = target; return e; }
+
+inline Result run(const std::vector<std::uint8_t>& bytes, MemoryFs& fs, Options o = {}) {
+    o.file_system = &fs;
+    return extract_archive(ArchiveSource::from_memory(bytes.data(), bytes.size()), kDest, o);
+}
+
+template <typename F>
+bool throws(Status expected, F&& f) {
+    try { f(); }
+    catch (const Error& e) { return e.status() == expected; }
+    return false;
+}
+
+}  // namespace tsupport
