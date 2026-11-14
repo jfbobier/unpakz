@@ -1,5 +1,9 @@
 # unpakz
 
+> **Work in progress: moving to a C++ backend.** The engine now lives in `native/` (`unpakz.dll`: ZIP/ZIP64 including > 2 GiB, tar.gz, RAR 4 and
+> RAR 5, built on libarchive and our RAR5 reader) with .NET Framework 4.8 front ends to follow; see [docs/STATUS.md](docs/STATUS.md) for what is
+> done and measured. The text below describes the released v0.1.0 (C#, .NET 10), which stays until the front ends are migrated.
+>
 > **Experimental (v0.1.0).** Written test-first with AI assistance as a harness-engineering exercise. It has been tested on Linux/WSL
 > and on Windows 11 (automated tests only, no field use). Real drag-and-drop into Explorer has **not** been observed working
 > (see [Known limitations](#known-limitations)). Review the code before trusting it with anything important: archive extraction is

@@ -1,5 +1,8 @@
 # Unpakz plan
 
+> **Superseded in part (2026-11-14):** the architecture is now a C++ backend DLL with .NET Framework 4.8 front ends; see `docs/decisions/0003` and
+> `docs/STATUS.md`. The sections below are the original C# plan, kept for the verification-harness design and the milestones history.
+
 ## Goal
 Fast, small, safe, extraction-only archive tool for Windows (ZIP/ZIP64 first, RAR5 then RAR4), with a minimal GUI and
 default-app association. Target machine: Ryzen 9800X3D (Zen 5, AVX-512), 64 GB RAM, Nvidia GPU, NVMe.
