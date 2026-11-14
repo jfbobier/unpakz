@@ -12,11 +12,15 @@
 
 namespace unpakz {
 
+// Which reader handles RAR 5. Native is our own decoder (verified against 7-Zip/unrar); Libarchive exists for comparison tests.
+enum class RarEngine { Native, Libarchive };
+
 struct Limits {
     std::uint64_t max_entries = 1'000'000;
     std::uint64_t max_entry_size = 256ull << 30;   // 256 GiB, declared and actual
     std::uint64_t max_total_size = 1ull << 40;     // 1 TiB, declared and actual
     std::uint32_t max_volumes = 65536;
+    std::uint64_t max_dictionary = 1ull << 30;     // largest RAR decompression window we will allocate (1 GiB)
     GuardOptions guard;
 };
 
@@ -60,6 +64,7 @@ struct Options {
     // Read the archive twice so that every problem is found before the first byte is written. Costs a second decompression for
     // stream formats (tar.gz); seekable formats (zip, rar) only re-read headers' worth of data in the first pass.
     bool preflight_pass = true;
+    RarEngine rar5_engine = RarEngine::Native;
     Limits limits;
     std::function<bool(const EntryInfo&)> filter;           // return true to extract the entry
     std::function<void(const Progress&)> progress;

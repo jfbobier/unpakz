@@ -4,8 +4,8 @@
 #include <set>
 #include <unordered_set>
 
+#include "entry_reader.h"
 #include "scoped_locale.h"
-#include "reader.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -71,35 +71,23 @@ struct Entry {
     bool name_valid = true;
     PathRejection rejection = PathRejection::None;
     bool is_directory_path = false;
+    std::string unsupported;
 };
 
-Entry analyze(struct archive_entry* e, std::uint64_t index, const Limits& limits) {
+Entry analyze(const EntryFacts& facts, std::uint64_t index, const Limits& limits) {
     Entry r;
     r.info.index = index;
 
-    const char* utf8 = archive_entry_pathname_utf8(e);
-    const char* raw = utf8 ? utf8 : archive_entry_pathname(e);
-    std::string bytes = raw ? raw : "";
-    if (!utf8_to_utf16(bytes, r.info.name)) {
+    if (!utf8_to_utf16(facts.name_utf8, r.info.name) || !facts.name_valid) {
         r.name_valid = false;
         r.info.name = u"<name is not valid text>";
     }
 
-    const bool hardlink = archive_entry_hardlink(e) != nullptr || archive_entry_hardlink_utf8(e) != nullptr;
-    switch (archive_entry_filetype(e)) {
-        case AE_IFREG: r.info.kind = hardlink ? EntryKind::Hardlink : EntryKind::File; break;
-        case AE_IFDIR: r.info.kind = EntryKind::Directory; break;
-        case AE_IFLNK: r.info.kind = EntryKind::Symlink; break;
-        default: r.info.kind = hardlink ? EntryKind::Hardlink : EntryKind::Special; break;
-    }
-
-    r.info.size_known = archive_entry_size_is_set(e) != 0;
-    if (r.info.size_known) {
-        auto sz = archive_entry_size(e);
-        if (sz < 0) throw Error(Status::Corrupt, "entry has a negative size");
-        r.info.size = static_cast<std::uint64_t>(sz);
-    }
-    if (archive_entry_mtime_is_set(e)) r.info.mtime = Timestamp{static_cast<std::int64_t>(archive_entry_mtime(e)), static_cast<std::int32_t>(archive_entry_mtime_nsec(e))};
+    r.info.kind = facts.kind;
+    r.info.size_known = facts.size_known;
+    r.info.size = facts.size;
+    r.info.mtime = facts.mtime;
+    r.unsupported = facts.unsupported;
 
     if (!r.name_valid) {
         r.rejection = PathRejection::InvalidCharacter;
@@ -150,6 +138,9 @@ public:
         if (e.info.kind == EntryKind::Symlink || e.info.kind == EntryKind::Hardlink) return {Action::Skip, SkipReason::Link};
         if (e.info.kind == EntryKind::Special) return {Action::Skip, SkipReason::Special};
 
+        if (e.info.kind == EntryKind::File && !e.unsupported.empty())
+            throw Error(Status::Unsupported, "'" + narrow(e.info.relative_path) + "': " + e.unsupported);
+
         const auto key = fold(e.info.relative_path);
         // every parent directory must not be a file
         for (std::size_t slash = key.find(u'/'); slash != std::u16string::npos; slash = key.find(u'/', slash + 1)) {
@@ -192,15 +183,6 @@ struct PlannedItem {
     bool directory;
 };
 
-// Reads the next header; returns false at end of archive. Throws on errors.
-bool next_header(struct archive* a, struct archive_entry* e) {
-    archive_entry_clear(e);
-    int r = archive_read_next_header2(a, e);
-    if (r == ARCHIVE_EOF) return false;
-    if (r == ARCHIVE_OK || r == ARCHIVE_WARN) return true;     // WARN on a header is advisory (e.g. a name needs charset conversion)
-    throw_reader_error(a, "cannot read entry");
-}
-
 class Extractor {
 public:
     Extractor(const ArchiveSource& source, const std::u16string& dest, const Options& options)
@@ -233,14 +215,14 @@ private:
     }
 
     std::vector<PlannedItem> plan_pass(std::uint64_t& declared_total) {
-        auto reader = open_reader(source_, o_.limits);
-        std::unique_ptr<archive_entry, decltype(&archive_entry_free)> e(archive_entry_new(), archive_entry_free);
+        auto reader = open_entries(source_, o_.limits, o_.rar5_engine);
+        EntryFacts facts;
         Planner planner(o_.limits, o_.filter);
         std::vector<PlannedItem> plan;
         std::uint64_t index = 0;
-        while (next_header(reader.get(), e.get())) {
+        while (reader->next(facts)) {
             check_cancel();
-            auto entry = analyze(e.get(), index, o_.limits);
+            auto entry = analyze(facts, index, o_.limits);
             auto d = planner.add(entry);
             if (d.action != Planner::Action::Skip) plan.push_back({index, entry.info.name, entry.info.relative_path, d.action == Planner::Action::Directory});
             ++index;
@@ -316,17 +298,17 @@ private:
     }
 
     void write_pass(const std::vector<PlannedItem>& plan, std::uint64_t declared_total) {
-        auto reader = open_reader(source_, o_.limits);
-        std::unique_ptr<archive_entry, decltype(&archive_entry_free)> e(archive_entry_new(), archive_entry_free);
+        auto reader = open_entries(source_, o_.limits, o_.rar5_engine);
+        EntryFacts facts;
         Planner planner(o_.limits, o_.filter);
         std::uint64_t index = 0;
         std::size_t plan_pos = 0;
         std::uint64_t total_written = 0;
         std::uint64_t progress_total = declared_total;
 
-        while (next_header(reader.get(), e.get())) {
+        while (reader->next(facts)) {
             check_cancel();
-            auto entry = analyze(e.get(), index, o_.limits);
+            auto entry = analyze(facts, index, o_.limits);
             auto d = planner.add(entry);
             ++index;
 
@@ -346,12 +328,12 @@ private:
                 ++result_.directories;
                 continue;
             }
-            extract_file(reader.get(), entry, total_written, progress_total);
+            extract_file(*reader, entry, total_written, progress_total);
         }
         if (o_.preflight_pass && plan_pos != plan.size()) throw Error(Status::Corrupt, "the archive changed while it was being extracted");
     }
 
-    void extract_file(struct archive* a, const Entry& entry, std::uint64_t& total_written, std::uint64_t& progress_total) {
+    void extract_file(IEntryReader& reader, const Entry& entry, std::uint64_t& total_written, std::uint64_t& progress_total) {
         const auto& rel = entry.info.relative_path;
         require_confined(rel);
         auto slash = rel.rfind(u'/');
@@ -372,18 +354,11 @@ private:
         auto writer = fs_.create_file(full, declared <= kPreallocateLimit ? declared : 0);
 
         std::uint64_t written = 0;
-        for (;;) {
+        reader.read_data([&](const std::uint8_t* buf, std::size_t size, std::uint64_t offset) {
             check_cancel();
-            const void* buf = nullptr;
-            std::size_t size = 0;
-            la_int64_t offset = 0;
-            int r = archive_read_data_block(a, &buf, &size, &offset);
-            if (r == ARCHIVE_EOF) break;
-            if (r != ARCHIVE_OK) throw_reader_error(a, "cannot read data");     // WARN too: a CRC mismatch is reported as a warning
-
-            if (offset < 0 || static_cast<std::uint64_t>(offset) < written) throw Error(Status::Corrupt, "data blocks out of order");
+            if (offset < written) throw Error(Status::Corrupt, "data blocks out of order");
             // Sparse gaps are materialised as zeros, and count like any other byte.
-            std::uint64_t gap = static_cast<std::uint64_t>(offset) - written;
+            std::uint64_t gap = offset - written;
             if (gap > 0) {
                 charge(gap, written, total_written, rel);
                 static const std::vector<std::uint8_t> zeros(1 << 16, 0);
@@ -392,10 +367,12 @@ private:
                     writer->write(zeros.data(), n);
                     left -= n;
                 }
+                written += gap;
+                total_written += gap;
             }
             charge(size, written, total_written, rel);
             if (entry.info.size_known && written + size > entry.info.size) throw Error(Status::Corrupt, "'" + narrow(rel) + "' has more data than its header declares");
-            writer->write(static_cast<const std::uint8_t*>(buf), size);
+            writer->write(buf, size);
             written += size;
             total_written += size;
             if (o_.progress) {
@@ -403,7 +380,7 @@ private:
                 Progress p{total_written, progress_total, &entry.info.name};
                 o_.progress(p);
             }
-        }
+        });
 
         if (entry.info.size_known && written != entry.info.size) throw Error(Status::Corrupt, "'" + narrow(rel) + "' is shorter than its header declares");
         writer->commit(o_.restore_timestamps ? entry.info.mtime : std::nullopt, o_.overwrite == OverwritePolicy::Overwrite);
@@ -428,13 +405,13 @@ Result extract_archive(const ArchiveSource& source, const std::u16string& destin
 
 std::vector<EntryInfo> list_archive(const ArchiveSource& source, const Limits& limits) {
     ScopedUtf8Locale utf8_names;
-    auto reader = open_reader(source, limits);
-    std::unique_ptr<archive_entry, decltype(&archive_entry_free)> e(archive_entry_new(), archive_entry_free);
+    auto reader = open_entries(source, limits, RarEngine::Native);
+    EntryFacts facts;
     std::vector<EntryInfo> out;
     std::uint64_t index = 0;
-    while (next_header(reader.get(), e.get())) {
+    while (reader->next(facts)) {
         if (index >= limits.max_entries) throw Error(Status::LimitExceeded, "the archive has too many entries");
-        out.push_back(analyze(e.get(), index++, limits).info);
+        out.push_back(analyze(facts, index++, limits).info);
     }
     return out;
 }
