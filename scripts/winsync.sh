@@ -2,7 +2,9 @@
 # Copies the source tree (no binaries, no tools/, no .git) to a Windows folder the user authorised (Downloads) and runs a
 # command there through powershell.exe. Usage: scripts/winsync.sh "<powershell command run inside the copy>"
 set -euo pipefail
-WIN_USER_DIR="${UNPAKZ_WIN_DIR:-/mnt/c/Users/bobier jean-francois/Downloads/unpakz-build}"
+# Default: <your Windows profile>/Downloads/unpakz-build (override with UNPAKZ_WIN_DIR)
+WIN_PROFILE="$(wslpath "$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')")"
+WIN_USER_DIR="${UNPAKZ_WIN_DIR:-$WIN_PROFILE/Downloads/unpakz-build}"
 cd "$(dirname "$0")/.."
 mkdir -p "$WIN_USER_DIR"
 rsync -a --delete --exclude '.git/' --exclude 'bin/' --exclude 'obj/' --exclude 'bin-win/' --exclude 'obj-win/' \

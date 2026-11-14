@@ -10,7 +10,11 @@ $dlls = "Unpakz.Interop.dll", "unpakz_native.dll"
 Copy-Item "bin-win\Unpakz.App\Release\net48\Unpakz.exe", "bin-win\Unpakz.App\Release\net48\Unpakz.exe.config", "bin-win\Unpakz.App\Release\net48\Unpakz.Presentation.dll", "bin-win\Unpakz.App\Release\net48\Unpakz.Windows.dll" artifacts\app
 Copy-Item "bin-win\Unpakz.Cli\Release\net48\unpakz.exe", "bin-win\Unpakz.Cli\Release\net48\unpakz.exe.config" artifacts\cli
 foreach ($d in $dlls) { Copy-Item "bin-win\Unpakz.App\Release\net48\$d" artifacts\app; Copy-Item "bin-win\Unpakz.Cli\Release\net48\$d" artifacts\cli }
-foreach ($dir in "app", "cli") { Copy-Item LICENSE, docs\THIRD-PARTY.md "artifacts\$dir" }
+foreach ($dir in "app", "cli") {
+  Copy-Item LICENSE, docs\THIRD-PARTY.md "artifacts\$dir"
+  Copy-Item third_party\libarchive\COPYING "artifacts\$dir\LICENSE-libarchive.txt"      # BSD-2-Clause requires the notices to travel with binaries
+  Copy-Item third_party\zlib-ng\LICENSE.md "artifacts\$dir\LICENSE-zlib-ng.txt"
+}
 Compress-Archive -Force -Path artifacts\app\* -DestinationPath artifacts\unpakz-app-win-x64.zip
 Compress-Archive -Force -Path artifacts\cli\* -DestinationPath artifacts\unpakz-cli-win-x64.zip
 Get-FileHash artifacts\*.zip -Algorithm SHA256 | % { $_.Hash.ToLower() + "  " + (Split-Path $_.Path -Leaf) } | Set-Content artifacts\SHA256SUMS.txt -Encoding ascii
