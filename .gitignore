@@ -6,3 +6,4 @@ corpus/external/
 corpus/generated/
 bench/BenchmarkDotNet.Artifacts/
 tools/
+__pycache__/
