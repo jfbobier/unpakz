@@ -5,6 +5,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>false</IsPackable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
@@ -29,6 +31,9 @@
     <ProjectReference Include="..\..\src\Unpakz.Interop\Unpakz.Interop.csproj" />
     <!-- fixture builders are shared with the other test project -->
     <Compile Include="..\Support\*.cs" Link="Support\%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\build-msvc\unpakz_native.dll')">
+    <Content Include="$(MSBuildThisFileDirectory)..\..\native\build-msvc\unpakz_native.dll" Link="unpakz_native.dll" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\fixtures\**" Link="fixtures\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

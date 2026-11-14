@@ -160,7 +160,7 @@ internal static class Samples
     public static string RealRar(string dir)
     {
         var p = Path.Combine(dir, "real.rar");
-        File.Copy(Path.Combine(AppContext.BaseDirectory, "fixtures", "rar5-m3-mix.rar"), p);
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "fixtures", "rar5-m3-mix.rar"), p, true);
         return p;
     }
 

@@ -6,7 +6,7 @@ namespace Unpakz.Interop;
 /// <summary>The flat C API of unpakz.dll (native/include/unpakz.h), declared exactly once. Strings are UTF-16.</summary>
 internal static class NativeMethods
 {
-    private const string Dll = "unpakz.dll";
+    private const string Dll = "unpakz_native.dll";
     internal const uint ExpectedAbiVersion = 1;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]

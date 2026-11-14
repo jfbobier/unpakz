@@ -41,9 +41,10 @@ public class UiTests
                     {
                         using var model = new MainViewModel(new FakePicker(null), new FakePrompt(false));
                         using var form = new MainForm(model);
+                        Ui.Place(form, scale, size);                                  // show first: the window reacts to the model only once it exists
                         if (state == "broken") model.TryOpen(Samples.Broken(dir));
                         else if (state != "empty") model.TryOpen(Make(state, dir));
-                        Ui.Place(form, scale, size);
+                        Sta.Settle(100);
                         var problems = Ui.LayoutProblems(form);
                         if (scale == 1.0 && size.Width == 640) Ui.Screenshot(form, $"main-{state}");
                         Assert.True(problems.Count == 0, $"{state} @ {scale:0.00}x {size}: " + string.Join("; ", problems));
@@ -80,6 +81,12 @@ public class UiTests
         finally { try { Directory.Delete(dir, true); } catch (IOException) { } }
     }
 
+    private static void PumpDone(MainViewModel model)
+    {
+        try { Sta.Pump(() => !model.IsBusy && model.LastStatus is not null, 15_000); }
+        catch (TimeoutException) { throw new TimeoutException("Busy=" + model.IsBusy + " Status='" + model.Status + "' Open=" + model.IsOpen); }
+    }
+
     [Fact]
     public void Clicking_Extract_here_extracts_next_to_the_archive_and_reports_success()
     {
@@ -90,10 +97,11 @@ public class UiTests
             {
                 using var model = new MainViewModel(new FakePicker(null), new FakePrompt(false));
                 using var form = new MainForm(model);
-                model.TryOpen(Samples.Zip(dir));
                 Ui.Place(form, 1.0, new Size(640, 480));
+                model.TryOpen(Samples.Zip(dir));
+                Sta.Settle(100);
                 Ui.Find<Button>(form, "ExtractHere").PerformClick();
-                Sta.Pump(() => !model.IsBusy && model.LastStatus is not null);
+                PumpDone(model);
                 Assert.Equal(RunStatus.Success, model.LastStatus);
                 Assert.Equal(Samples.Tree["docs/guide.txt"], File.ReadAllBytes(Path.Combine(dir, "docs", "guide.txt")));
                 form.Close();
@@ -112,10 +120,11 @@ public class UiTests
             {
                 using var model = new MainViewModel(new FakePicker(Path.Combine(dir, "dest")), new FakePrompt(false));
                 using var form = new MainForm(model);
-                model.TryOpen(Samples.Hostile(dir));
                 Ui.Place(form, 1.0, new Size(640, 480));
+                model.TryOpen(Samples.Hostile(dir));
+                Sta.Settle(100);
                 Ui.Find<Button>(form, "ExtractTo").PerformClick();
-                Sta.Pump(() => !model.IsBusy && model.LastStatus is not null);
+                PumpDone(model);
                 Assert.Equal(RunStatus.Failed, model.LastStatus);
                 Assert.Contains("outside the chosen folder", Ui.Find<Label>(form, "Status").Text, StringComparison.Ordinal);
                 Assert.False(File.Exists(Path.Combine(dir, "dest", "ok")));

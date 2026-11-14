@@ -9,6 +9,13 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Version>0.2.0</Version>
   </PropertyGroup>
+  <PropertyGroup>
+    <!-- the native backend, built by scripts/native-win.ps1; it must sit next to the executable -->
+    <UnpakzNativeDll Condition="'$(UnpakzNativeDll)' == ''">$(MSBuildThisFileDirectory)..\..\native\build-msvc\unpakz_native.dll</UnpakzNativeDll>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(UnpakzNativeDll)')">
+    <Content Include="$(UnpakzNativeDll)" Link="unpakz_native.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <ProjectReference Include="..\Unpakz.Windows\Unpakz.Windows.csproj" />

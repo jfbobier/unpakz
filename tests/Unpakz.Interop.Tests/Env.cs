@@ -5,14 +5,14 @@ using Unpakz.Interop;
 
 namespace Unpakz.Interop.Tests;
 
-/// <summary>Points the P/Invoke "unpakz.dll" at the native library built from native/ (libunpakz.so on Linux, unpakz.dll on Windows).</summary>
+/// <summary>Points the P/Invoke "unpakz_native.dll" at the native library built from native/ (libunpakz_native.so on Linux, unpakz_native.dll on Windows).</summary>
 internal static class Env
 {
     [ModuleInitializer]
     internal static void Init() =>
         NativeLibrary.SetDllImportResolver(typeof(NativeArchive).Assembly, (name, _, _) =>
         {
-            if (name != "unpakz.dll") return IntPtr.Zero;
+            if (name != "unpakz_native.dll") return IntPtr.Zero;
             var path = Environment.GetEnvironmentVariable("UNPAKZ_NATIVE_LIB") ?? FindDefault();
             return NativeLibrary.Load(path);
         });
@@ -21,7 +21,7 @@ internal static class Env
     {
         for (var dir = AppContext.BaseDirectory; dir is not null; dir = Path.GetDirectoryName(dir))
         {
-            foreach (var candidate in new[] { "native/build-release/libunpakz.so", "native/build-msvc/unpakz.dll", "native/build-linux/libunpakz.so" })
+            foreach (var candidate in new[] { "native/build-release/libunpakz_native.so", "native/build-msvc/unpakz_native.dll", "native/build-linux/libunpakz_native.so" })
             {
                 var p = Path.Combine(dir, candidate);
                 if (File.Exists(p)) return p;

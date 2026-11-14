@@ -1,5 +1,5 @@
 # Calls unpakz.dll from Windows PowerShell (which runs on .NET Framework, like the planned front ends) through P/Invoke.
-param([string]$Dll = "native\build-msvc\unpakz.dll", [string]$Archive, [string]$Dest)
+param([string]$Dll = "native\build-msvc\unpakz_native.dll", [string]$Archive, [string]$Dest)
 $src = @"
 using System; using System.Runtime.InteropServices; using System.Text;
 public static class U {
