@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Unpakz.Core.Rar;
 using Unpakz.Core.Zip;
 
@@ -17,5 +18,17 @@ public static class ArchiveReader
             throw new ArchiveException("RAR 4.x archives are not supported yet.", ArchiveError.Unsupported);
 
         return ZipArchive.Open(data, limits);
+    }
+
+    /// <summary>Opens a set of volumes (first volume first). Only RAR 5 supports more than one volume.</summary>
+    public static IArchive Open(IReadOnlyList<ReadOnlyMemory<byte>> volumes, ArchiveLimits? limits = null)
+    {
+        ArgumentNullException.ThrowIfNull(volumes);
+        if (volumes.Count == 0) throw new ArgumentException("At least one volume is required.", nameof(volumes));
+        limits ??= new ArchiveLimits();
+
+        if (Rar5Archive.HasSignature(volumes[0].Span)) return Rar5Archive.Open(volumes, limits);
+        if (volumes.Count > 1) throw new ArchiveException("Multi-volume archives are only supported for RAR 5.", ArchiveError.Unsupported);
+        return Open(volumes[0], limits);
     }
 }

@@ -29,6 +29,7 @@ internal sealed class Rar5Builder
     public static readonly byte[] Signature = [0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00];
 
     private readonly List<byte[]> _blocks = [];
+    private readonly List<(string Name, byte[] Data, FileOpts Opts, bool IsDir)> _entries = [];
 
     public ulong ArchiveFlags { get; set; }
     public bool OmitMain { get; set; }
@@ -39,6 +40,7 @@ internal sealed class Rar5Builder
     {
         o ??= new FileOpts();
         _blocks.Add(FileBlock(o.NameBytes ?? Encoding.UTF8.GetBytes(name), data, o, isDir: false));
+        _entries.Add((name, data, o, false));
         return this;
     }
 
@@ -46,6 +48,7 @@ internal sealed class Rar5Builder
     {
         o ??= new FileOpts { Attr = 0x41ED };
         _blocks.Add(FileBlock(Encoding.UTF8.GetBytes(name), [], o, isDir: true));
+        _entries.Add((name, [], o, true));
         return this;
     }
 
@@ -70,6 +73,75 @@ internal sealed class Rar5Builder
         if (!OmitEnd) ms.Write(Block(5, 0, VInt(0), [], [], null, null));
         ms.Write(Trailing);
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Writes the entries as a multi-volume set. Each file's data is split so that no volume holds more than
+    /// <paramref name="dataPerVolume"/> bytes of file data; parts carry the split flags, non-final parts the CRC of their own
+    /// data and the final part the CRC of the whole file (as real rar does).
+    /// </summary>
+    public List<byte[]> BuildVolumes(int dataPerVolume)
+    {
+        var volumes = new List<List<byte[]>> { new() };
+        var room = dataPerVolume;
+
+        foreach (var (name, data, o, isDir) in _entries)
+        {
+            var nameBytes = o.NameBytes ?? Encoding.UTF8.GetBytes(name);
+            if (isDir || data.Length == 0)
+            {
+                volumes[^1].Add(FileBlock(nameBytes, data, o, isDir));
+                continue;
+            }
+
+            var offset = 0;
+            var first = true;
+            while (offset < data.Length)
+            {
+                if (room == 0) { volumes.Add([]); room = dataPerVolume; }
+
+                var take = Math.Min(room, data.Length - offset);
+                var last = offset + take == data.Length;
+                var part = data.AsSpan(offset, take).ToArray();
+                var crc = last ? o.CrcOverride ?? ZipBuilder.Crc32(data) : ZipBuilder.Crc32(part);
+                volumes[^1].Add(PartBlock(nameBytes, part, data.Length, crc, o, splitBefore: !first, splitAfter: !last));
+                offset += take;
+                room -= take;
+                first = false;
+            }
+        }
+
+        var result = new List<byte[]>();
+        for (var i = 0; i < volumes.Count; i++)
+        {
+            using var ms = new MemoryStream();
+            ms.Write(Signature);
+            var spec = new List<byte>(VInt(i == 0 ? 0x01UL : 0x03UL));
+            if (i > 0) spec.AddRange(VInt((ulong)i));
+            ms.Write(Block(1, 0, [.. spec], [], [], null, null));
+            foreach (var b in volumes[i]) ms.Write(b);
+            ms.Write(Block(5, 0, VInt(i < volumes.Count - 1 ? 1UL : 0UL), [], [], null, null));
+            result.Add(ms.ToArray());
+        }
+
+        return result;
+    }
+
+    private static byte[] PartBlock(byte[] name, byte[] part, int whole, uint crc, FileOpts o, bool splitBefore, bool splitAfter)
+    {
+        var comp = ((ulong)o.Method << 7) | (o.Solid ? 1UL << 6 : 0) | (uint)o.CompressionVersion | ((ulong)(uint)o.DictionaryLog << 10);
+        var spec = new List<byte>();
+        spec.AddRange(VInt(4UL | (o.Mtime is not null ? 2UL : 0)));
+        spec.AddRange(VInt((ulong)whole));
+        spec.AddRange(VInt(o.Attr));
+        if (o.Mtime is { } m) spec.AddRange(U32(m));
+        spec.AddRange(U32(crc));
+        spec.AddRange(VInt(comp));
+        spec.AddRange(VInt(o.Host));
+        spec.AddRange(VInt((ulong)name.Length));
+        spec.AddRange(name);
+        var flags = (splitBefore ? 0x08UL : 0) | (splitAfter ? 0x10UL : 0);
+        return Block(2, flags, [.. spec], o.Extras.SelectMany(e => e).ToArray(), part, null, null);
     }
 
     // ---- extra records ----

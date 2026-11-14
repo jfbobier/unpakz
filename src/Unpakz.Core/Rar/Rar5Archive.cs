@@ -8,8 +8,8 @@ namespace Unpakz.Core.Rar;
 
 /// <summary>
 /// RAR 5.x container reader (layout from RARLAB's public technical note). Every length is range-checked, every header CRC verified.
-/// Implemented: all structure, stored entries, link/special detection, timestamps.
-/// Reported as Unsupported (never guessed): compressed methods, encryption, BLAKE2-only integrity, multi-volume, encrypted headers.
+/// Implemented: all structure, stored and compressed entries, solid archives, multi-volume sets, link/special detection, timestamps.
+/// Reported as Unsupported (never guessed): encryption, BLAKE2-only integrity, encrypted headers. Multi-volume sets are supported.
 /// </summary>
 public sealed class Rar5Archive : IArchive
 {
@@ -19,7 +19,6 @@ public sealed class Rar5Archive : IArchive
     private const int MaxHeaderSize = 2 * 1024 * 1024;
     private const ulong MaxFileTime = 2_650_467_743_999_999_999UL;
 
-    private readonly ReadOnlyMemory<byte> _data;
     private readonly List<RarFile> _files;
     private readonly List<List<int>> _groups;
     private readonly object _decoderLock = new();
@@ -34,10 +33,36 @@ public sealed class Rar5Archive : IArchive
 
     public IReadOnlyList<ArchiveEntry> Entries { get; }
 
+    /// <summary>Number of volumes this archive was assembled from (1 for an ordinary archive).</summary>
+    public int VolumeCount { get; }
+
     private sealed record RarFile(
         string Name, EntryKind Kind, ulong PackedSize, ulong UnpackedSize, uint? Crc32, bool UnknownSize, bool Encrypted,
-        int Method, long BlockStart, long DataStart, DateTime? LastWrite,
+        int Method, ulong SpanStart, ulong SpanEnd, ReadOnlyMemory<byte>[] Segments, DateTime? LastWrite,
         bool Solid, int DictLog, int Version, int Group, int GroupIndex);
+
+    /// <summary>Everything one file-header block says; several of these (one per volume) can make up one file.</summary>
+    private sealed class FilePart
+    {
+        public required string Name { get; init; }
+        public required EntryKind Kind { get; init; }
+        public required ulong Unpacked { get; init; }
+        public required bool UnknownSize { get; init; }
+        public required uint? Crc { get; init; }
+        public required ulong CompInfo { get; init; }
+        public required ulong Host { get; init; }
+        public required bool Encrypted { get; init; }
+        public required DateTime? LastWrite { get; init; }
+    }
+
+    /// <summary>A file whose data started in one volume and continues in the next.</summary>
+    private sealed class PendingFile(FilePart first, ulong spanStart)
+    {
+        public FilePart First { get; } = first;
+        public ulong SpanStart { get; } = spanStart;
+        public List<ReadOnlyMemory<byte>> Segments { get; } = [];
+        public ulong Packed { get; set; }
+    }
 
     /// <summary>Chains compressed files into solid groups (a non-solid file starts a new group); stored files and non-files take no part.</summary>
     private static List<List<int>> AssignGroups(List<RarFile> files)
@@ -66,10 +91,10 @@ public sealed class Rar5Archive : IArchive
 
     public static bool HasRar4Signature(ReadOnlySpan<byte> data) => data.StartsWith(Signature4);
 
-    private Rar5Archive(ReadOnlyMemory<byte> data, List<RarFile> files)
+    private Rar5Archive(List<RarFile> files, int volumeCount)
     {
-        _data = data;
         _files = files;
+        VolumeCount = volumeCount;
         _groups = AssignGroups(files);
         var list = new List<ArchiveEntry>(files.Count);
         for (var i = 0; i < files.Count; i++)
@@ -81,87 +106,180 @@ public sealed class Rar5Archive : IArchive
         Entries = list;
     }
 
-    public static Rar5Archive Open(ReadOnlyMemory<byte> data, ArchiveLimits limits)
+    public static Rar5Archive Open(ReadOnlyMemory<byte> data, ArchiveLimits limits) => Open([data], limits);
+
+    /// <summary>Opens a multi-volume set: the volumes in order, first volume first. A set with a volume missing is refused.</summary>
+    public static Rar5Archive Open(IReadOnlyList<ReadOnlyMemory<byte>> volumes, ArchiveLimits limits)
     {
+        ArgumentNullException.ThrowIfNull(volumes);
         ArgumentNullException.ThrowIfNull(limits);
-        var span = data.Span;
-        if (!HasSignature(span)) throw new ArchiveException("Not a RAR 5 archive.");
+        if (volumes.Count == 0) throw new ArgumentException("At least one volume is required.", nameof(volumes));
+        if (volumes.Count > limits.MaxVolumes) throw new ArchiveException("Too many volumes.", ArchiveError.LimitExceeded);
 
-        var files = new List<RarFile>();
-        long pos = Signature.Length, len = span.Length;
-        var first = true;
-        var sawEnd = false;
+        var parser = new VolumeParser(volumes, limits);
+        return new Rar5Archive(parser.Run(), volumes.Count);
+    }
 
-        while (pos < len && !sawEnd)
+    /// <summary>Parses all volumes in sequence, joining the parts of split files.</summary>
+    private sealed class VolumeParser(IReadOnlyList<ReadOnlyMemory<byte>> volumes, ArchiveLimits limits)
+    {
+        private readonly List<RarFile> _files = [];
+        private PendingFile? _pending;
+        private ulong _base;      // virtual offset of the current volume: volumes laid end to end
+
+        public List<RarFile> Run()
         {
-            if (len - pos < 5) throw new ArchiveException("Truncated RAR block header.");
-            var crcStored = BinaryPrimitives.ReadUInt32LittleEndian(span[(int)pos..]);
-            if (!VInt.TryRead(span[(int)(pos + 4)..], out var headerSize, out var sizeLen))
-                throw new ArchiveException("Invalid RAR header size.");
-            if (headerSize == 0 || headerSize > MaxHeaderSize) throw new ArchiveException("RAR header size out of range.");
-
-            var headerStart = pos + 4 + sizeLen;
-            var headerEnd = headerStart + (long)headerSize;
-            if (headerEnd > len) throw new ArchiveException("RAR header extends past the archive.");
-            if (Crc32.Compute(span[(int)(pos + 4)..(int)headerEnd]) != crcStored)
-                throw new ArchiveException("RAR header CRC mismatch.");
-
-            var header = span[(int)headerStart..(int)headerEnd];
-            var c = new Cursor(header);
-            var type = c.ReadVInt();
-            var flags = c.ReadVInt();
-            var extraSize = (flags & 1) != 0 ? c.ReadVInt() : 0;
-            var dataSize = (flags & 2) != 0 ? c.ReadVInt() : 0;
-            if (extraSize > (ulong)c.Remaining) throw new ArchiveException("RAR extra area larger than its header.");
-            if (dataSize > (ulong)(len - headerEnd)) throw new ArchiveException("RAR data area extends past the archive.");
-            if ((flags & 0x18) != 0) throw new ArchiveException("Multi-volume RAR archives are not supported.", ArchiveError.Unsupported);
-
-            if (first)
+            for (var v = 0; v < volumes.Count; v++)
             {
-                if (type == 4) throw new ArchiveException("Encrypted RAR headers are not supported.", ArchiveError.Unsupported);
-                if (type != 1) throw new ArchiveException("RAR main header missing.");
+                var more = ParseVolume(v);
+                var last = v == volumes.Count - 1;
+                if (!last && !more)
+                    throw new ArchiveException($"Volume {v + 1} says it is the last volume, but more volumes were supplied.");
+                if (last && more)
+                    throw new ArchiveException($"The set is incomplete: volume {v + 2} is missing.", ArchiveError.MissingVolume) { Volume = v + 2 };
+
+                _base += (ulong)volumes[v].Length;
             }
 
-            var dataStart = headerEnd;
-            switch (type)
-            {
-                case 1:
-                    if (!first) throw new ArchiveException("Duplicate RAR main header.");
-                    ReadMainHeader(ref c);
-                    break;
-                case 2:
-                    if (files.Count >= limits.MaxEntries) throw new ArchiveException("Too many entries.", ArchiveError.LimitExceeded);
-                    files.Add(ReadFileHeader(header, c, (int)extraSize, dataSize, pos, dataStart));
-                    break;
-                case 3:   // service header (comment, recovery record, quick open, NTFS streams): not extracted
-                    break;
-                case 4:
-                    throw new ArchiveException("Encrypted RAR headers are not supported.", ArchiveError.Unsupported);
-                case 5:
-                    sawEnd = true;
-                    break;
-                default:
-                    if ((flags & 4) == 0)
-                        throw new ArchiveException($"Unknown mandatory RAR block type {type}.", ArchiveError.Unsupported);
-                    break;
-            }
-
-            first = false;
-            pos = dataStart + (long)dataSize;
+            if (_pending is not null) throw new ArchiveException($"File '{_pending.First.Name}' starts in one volume but never continues.");
+            return _files;
         }
 
-        if (!sawEnd) throw new ArchiveException("RAR end-of-archive block missing.");
-        return new Rar5Archive(data, files);
+        /// <summary>Parses one volume; returns true if its end block says another volume follows.</summary>
+        private bool ParseVolume(int volume)
+        {
+            var data = volumes[volume];
+            var span = data.Span;
+            if (!HasSignature(span)) throw new ArchiveException($"Volume {volume + 1} is not a RAR 5 archive.");
+
+            long pos = Signature.Length, len = span.Length;
+            var first = true;
+            var more = false;
+            var sawEnd = false;
+
+            while (pos < len && !sawEnd)
+            {
+                if (len - pos < 5) throw new ArchiveException("Truncated RAR block header.");
+                var crcStored = BinaryPrimitives.ReadUInt32LittleEndian(span[(int)pos..]);
+                if (!VInt.TryRead(span[(int)(pos + 4)..], out var headerSize, out var sizeLen))
+                    throw new ArchiveException("Invalid RAR header size.");
+                if (headerSize == 0 || headerSize > MaxHeaderSize) throw new ArchiveException("RAR header size out of range.");
+
+                var headerStart = pos + 4 + sizeLen;
+                var headerEnd = headerStart + (long)headerSize;
+                if (headerEnd > len) throw new ArchiveException("RAR header extends past the archive.");
+                if (Crc32.Compute(span[(int)(pos + 4)..(int)headerEnd]) != crcStored)
+                    throw new ArchiveException("RAR header CRC mismatch.");
+
+                var header = span[(int)headerStart..(int)headerEnd];
+                var c = new Cursor(header);
+                var type = c.ReadVInt();
+                var flags = c.ReadVInt();
+                var extraSize = (flags & 1) != 0 ? c.ReadVInt() : 0;
+                var dataSize = (flags & 2) != 0 ? c.ReadVInt() : 0;
+                if (extraSize > (ulong)c.Remaining) throw new ArchiveException("RAR extra area larger than its header.");
+                if (dataSize > (ulong)(len - headerEnd)) throw new ArchiveException("RAR data area extends past the archive.");
+
+                if (first)
+                {
+                    if (type == 4) throw new ArchiveException("Encrypted RAR headers are not supported.", ArchiveError.Unsupported);
+                    if (type != 1) throw new ArchiveException("RAR main header missing.");
+                }
+
+                var dataStart = headerEnd;
+                switch (type)
+                {
+                    case 1:
+                        if (!first) throw new ArchiveException("Duplicate RAR main header.");
+                        ReadMainHeader(ref c, volume);
+                        break;
+                    case 2:
+                        AddPart(ReadFilePart(header, c, (int)extraSize), flags, volume, pos, dataStart, dataSize, data);
+                        break;
+                    case 3:   // service header (comment, recovery record, quick open, NTFS streams): not extracted
+                        break;
+                    case 4:
+                        throw new ArchiveException("Encrypted RAR headers are not supported.", ArchiveError.Unsupported);
+                    case 5:
+                        sawEnd = true;
+                        more = c.Remaining > 0 && (c.ReadVInt() & 1) != 0;
+                        break;
+                    default:
+                        if ((flags & 4) == 0)
+                            throw new ArchiveException($"Unknown mandatory RAR block type {type}.", ArchiveError.Unsupported);
+                        break;
+                }
+
+                first = false;
+                pos = dataStart + (long)dataSize;
+            }
+
+            if (!sawEnd) throw new ArchiveException("RAR end-of-archive block missing.");
+            return more;
+        }
+
+        private void ReadMainHeader(ref Cursor c, int volume)
+        {
+            var archiveFlags = c.ReadVInt();
+            var isVolume = (archiveFlags & 0x01) != 0;
+            var number = (archiveFlags & 0x02) != 0 ? c.ReadVInt() : 0;
+
+            if (volumes.Count > 1 && !isVolume) throw new ArchiveException($"Volume {volume + 1} is not part of a multi-volume set.");
+            if (number > (ulong)volume)
+                throw new ArchiveException($"The set is incomplete: volume {volume + 1} is missing.", ArchiveError.MissingVolume) { Volume = volume + 1 };
+            if (number < (ulong)volume) throw new ArchiveException($"Volume {volume + 1} is out of order or duplicated.");
+        }
+
+        private void AddPart(FilePart part, ulong flags, int volume, long blockStart, long dataStart, ulong dataSize, ReadOnlyMemory<byte> data)
+        {
+            var splitBefore = (flags & 0x08) != 0;
+            var splitAfter = (flags & 0x10) != 0;
+            var segment = data.Slice((int)dataStart, (int)dataSize);
+            var spanStart = _base + (ulong)blockStart;
+            var spanEnd = _base + (ulong)dataStart + dataSize;
+
+            if (_pending is { } pending)
+            {
+                if (!splitBefore)
+                    throw new ArchiveException($"File '{pending.First.Name}' should continue in this volume, but a different entry follows.");
+                var f = pending.First;
+                if (part.Name != f.Name || part.Unpacked != f.Unpacked || part.CompInfo != f.CompInfo || part.Host != f.Host)
+                    throw new ArchiveException($"The parts of '{f.Name}' disagree about the file.");
+
+                pending.Segments.Add(segment);
+                pending.Packed += dataSize;
+                if (splitAfter) return;
+
+                _pending = null;
+                _files.Add(Complete(pending, part.Crc, spanEnd));
+                return;
+            }
+
+            if (splitBefore) throw new ArchiveException($"'{part.Name}' is a continuation, but nothing precedes it.");
+            if (_files.Count >= limits.MaxEntries) throw new ArchiveException("Too many entries.", ArchiveError.LimitExceeded);
+
+            var started = new PendingFile(part, spanStart);
+            started.Segments.Add(segment);
+            started.Packed = dataSize;
+            if (splitAfter)
+            {
+                _pending = started;
+                return;
+            }
+
+            _files.Add(Complete(started, part.Crc, spanEnd));
+        }
+
+        private static RarFile Complete(PendingFile p, uint? crc, ulong spanEnd)
+        {
+            var f = p.First;
+            return new RarFile(f.Name, f.Kind, p.Packed, f.UnknownSize ? p.Packed : f.Unpacked, crc, f.UnknownSize, f.Encrypted,
+                (int)((f.CompInfo >> 7) & 7), p.SpanStart, spanEnd, [.. p.Segments], f.LastWrite,
+                (f.CompInfo & 0x40) != 0, (int)((f.CompInfo >> 10) & 0xF), (int)(f.CompInfo & 0x3F), -1, 0);
+        }
     }
 
-    private static void ReadMainHeader(ref Cursor c)
-    {
-        var archiveFlags = c.ReadVInt();
-        if ((archiveFlags & 0x01) != 0) throw new ArchiveException("Multi-volume RAR archives are not supported.", ArchiveError.Unsupported);
-        if ((archiveFlags & 0x02) != 0) c.ReadVInt();   // volume number
-    }
-
-    private static RarFile ReadFileHeader(ReadOnlySpan<byte> header, Cursor c, int extraSize, ulong packedSize, long blockStart, long dataStart)
+    private static FilePart ReadFilePart(ReadOnlySpan<byte> header, Cursor c, int extraSize)
     {
         var fileFlags = c.ReadVInt();
         var unpacked = c.ReadVInt();
@@ -208,10 +326,18 @@ public sealed class Rar5Archive : IArchive
         }
 
         var directory = (fileFlags & 0x01) != 0;
-        var unknownSize = (fileFlags & 0x08) != 0;
-        return new RarFile(name, KindOf(redirected, directory, host, attributes), packedSize, unknownSize ? packedSize : unpacked, crc,
-            unknownSize, encrypted, (int)((compInfo >> 7) & 7), blockStart, dataStart, mtime,
-            (compInfo & 0x40) != 0, (int)((compInfo >> 10) & 0xF), (int)(compInfo & 0x3F), -1, 0);
+        return new FilePart
+        {
+            Name = name,
+            Kind = KindOf(redirected, directory, host, attributes),
+            Unpacked = unpacked,
+            UnknownSize = (fileFlags & 0x08) != 0,
+            Crc = crc,
+            CompInfo = compInfo,
+            Host = host,
+            Encrypted = encrypted,
+            LastWrite = mtime,
+        };
     }
 
     private static EntryKind KindOf(bool redirected, bool directory, ulong host, ulong attributes)
@@ -249,7 +375,7 @@ public sealed class Rar5Archive : IArchive
     public (ulong Start, ulong End) GetSpan(ArchiveEntry entry)
     {
         var f = _files[entry.Index];
-        return ((ulong)f.BlockStart, (ulong)f.DataStart + f.PackedSize);
+        return (f.SpanStart, f.SpanEnd);
     }
 
     public void Extract(ArchiveEntry entry, IOutputSink sink, ArchiveLimits limits)
@@ -271,7 +397,7 @@ public sealed class Rar5Archive : IArchive
         {
             if (f.PackedSize != f.UnpackedSize) throw new ArchiveException("Stored entry has mismatched sizes.");
 
-            var crc = StoredData.Copy(_data.Slice((int)f.DataStart, (int)f.PackedSize), sink);
+            var crc = StoredData.Copy(f.Segments, sink);
             if (crc != f.Crc32) throw new ArchiveException("CRC-32 mismatch.");
             return;
         }
@@ -331,7 +457,7 @@ public sealed class Rar5Archive : IArchive
         if (verify.Crc != f.Crc32) throw new ArchiveException("CRC-32 mismatch.");
     }
 
-    private PackedStream PackedFor(RarFile f) => new(_data.Slice((int)f.DataStart, (int)f.PackedSize));
+    private static PackedStream PackedFor(RarFile f) => new(f.Segments);
 
     private static long NextPowerOfTwo(ulong value)
     {

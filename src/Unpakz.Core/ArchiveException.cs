@@ -14,12 +14,17 @@ public enum ArchiveError
     UnsafePath,
     /// <summary>Entries collide with each other or with existing files and policy forbids proceeding.</summary>
     Conflict,
+    /// <summary>A volume of a multi-volume set was not provided (see <see cref="ArchiveException.Volume"/>).</summary>
+    MissingVolume,
 }
 
 /// <summary>The only exception type decoders and parsers may throw for bad input.</summary>
 public sealed class ArchiveException : Exception
 {
     public ArchiveError Error { get; }
+
+    /// <summary>For <see cref="ArchiveError.MissingVolume"/>: the 1-based number of the volume that is needed (as in name.part3.rar).</summary>
+    public int? Volume { get; init; }
 
     public ArchiveException(string message, ArchiveError error = ArchiveError.Corrupt) : base(message) => Error = error;
 

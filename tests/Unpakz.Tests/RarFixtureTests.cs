@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Unpakz.Core;
+using Unpakz.Engine;
 using Unpakz.Tests.Support;
 
 namespace Unpakz.Tests;
@@ -30,6 +31,17 @@ public class RarFixtureTests
         new("rar5-md256m-tiny.rar", ["-m3", "-md256m"], () => new() { ["note.txt"] = TestData.Text(5000, 8) }),
         new("rar5-m1-stored-and-packed.rar", ["-m1"], () => new() { ["a.txt"] = TestData.Text(6000, 3), ["noise.bin"] = TestData.Random(1500), ["b.txt"] = TestData.Text(2500, 4) }),
     ];
+
+    private sealed record VolumeSet(string Dir, string[] Switches, Func<Dictionary<string, byte[]>> Content);
+
+    private static readonly VolumeSet[] Sets =
+    [
+        new("mv-stored", ["-m0", "-v2k"], () => new() { ["a.txt"] = TestData.Text(3000, 1), ["b.bin"] = TestData.Random(2500), ["c.txt"] = TestData.Text(900, 2) }),
+        new("mv-m3", ["-m3", "-v1k"], () => new() { ["a.txt"] = TestData.Text(9000, 3), ["t.bin"] = TestData.Table(3000), ["c.txt"] = TestData.Text(700, 4) }),
+        new("mv-solid", ["-m3", "-s", "-v1k"], () => new() { ["a.txt"] = TestData.Text(6000, 5), ["b.txt"] = TestData.Text(6000, 6), ["c.txt"] = TestData.Text(2500, 7) }),
+    ];
+
+    public static TheoryData<string> SetNames() => [.. Sets.Select(f => f.Dir)];
 
     public static TheoryData<string> Names() => [.. Fixtures.Select(f => f.File)];
 
@@ -107,6 +119,78 @@ public class RarFixtureTests
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(120), $"sweep took {clock.Elapsed}: something decodes far too slowly on corrupt input");
     }
 
+    private static List<byte[]> LoadSet(string dir) =>
+        [.. Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "Fixtures", dir), "*.rar")
+            .OrderBy(f => int.Parse(System.Text.RegularExpressions.Regex.Match(Path.GetFileName(f), @"part(\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
+            .Select(File.ReadAllBytes)];
+
+    private static Dictionary<string, byte[]> ExtractSet(List<byte[]> volumes)
+    {
+        var a = ArchiveReader.Open([.. volumes.Select(v => (ReadOnlyMemory<byte>)v)]);
+        var result = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        foreach (var e in a.Entries.Where(e => e.Kind == EntryKind.File))
+        {
+            a.CheckSupported(e);
+            var sink = new MemorySink();
+            a.Extract(e, sink, new ArchiveLimits { MaxEntrySize = 1 << 22 });
+            result[e.Name] = sink.ToArray();
+        }
+
+        return result;
+    }
+
+    [Theory]
+    [MemberData(nameof(SetNames))]
+    public void Volume_set_fixture_extracts_to_the_expected_content(string dir)
+    {
+        var volumes = LoadSet(dir);
+        Assert.True(volumes.Count >= 3, "a fixture set needs several volumes");
+        var expected = Sets.Single(s => s.Dir == dir).Content();
+        var actual = ExtractSet(volumes);
+        Assert.Equal(expected.Keys.Order(StringComparer.Ordinal), actual.Keys.Order(StringComparer.Ordinal));
+        foreach (var (k, v) in expected) Assert.True(v.AsSpan().SequenceEqual(actual[k]), $"content differs: {k}");
+    }
+
+    [Theory]
+    [MemberData(nameof(SetNames))]
+    public void Every_truncation_and_corruption_of_every_volume_never_yields_silently_wrong_data(string dir)
+    {
+        var expected = Sets.Single(s => s.Dir == dir).Content();
+        var volumes = LoadSet(dir);
+        var clock = Stopwatch.StartNew();
+
+        void Check(List<byte[]> set, string what)
+        {
+            try
+            {
+                foreach (var (k, v) in ExtractSet(set))
+                    Assert.True(expected.TryGetValue(k, out var e) && v.AsSpan().SequenceEqual(e), $"wrong data accepted: {what} -> {k}");
+            }
+            catch (ArchiveException) { }
+        }
+
+        for (var v = 0; v < volumes.Count; v++)
+        {
+            for (var len = 0; len < volumes[v].Length; len += 3)
+                Check([.. volumes.Select((x, i) => i == v ? x[..len] : x)], $"volume {v + 1} cut at {len}");
+
+            var work = volumes.Select(x => (byte[])x.Clone()).ToList();
+            for (var i = 0; i < work[v].Length; i++)
+            {
+                var original = work[v][i];
+                foreach (var mask in new byte[] { 0x01, 0x80, 0xFF })
+                {
+                    work[v][i] = (byte)(original ^ mask);
+                    Check(work, $"volume {v + 1} byte {i} ^ {mask:X2}");
+                }
+
+                work[v][i] = original;
+            }
+        }
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(120), $"sweep took {clock.Elapsed}");
+    }
+
     [Fact]
     public void A_huge_declared_dictionary_is_fine_for_small_data_even_under_a_tight_memory_limit()
     {
@@ -153,6 +237,30 @@ public class RarFixtureTests
         while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "tests", "Unpakz.Tests"))) dir = dir.Parent;
         var target = Path.Combine(dir!.FullName, "tests", "Unpakz.Tests", "Fixtures");
         Directory.CreateDirectory(target);
+
+        foreach (var set in Sets)
+        {
+            var setDir = Path.Combine(target, set.Dir);
+            if (Directory.Exists(setDir)) Directory.Delete(setDir, recursive: true);
+            Directory.CreateDirectory(setDir);
+            var work = Oracle.NewWorkDir("regen-set");
+            try
+            {
+                foreach (var (rel, data) in set.Content())
+                {
+                    var path = Path.Combine(work, "src", rel);
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    File.WriteAllBytes(path, data);
+                }
+
+                List<string> args = ["a", "-ma5", "-r", "-idq", "-y", "-ep1", "-tsm-", "-tsc-", "-tsa-", .. set.Switches, Path.Combine(setDir, "a.rar"), "*"];
+                Assert.True(Oracle.Run(rar, args, Path.Combine(work, "src"), out var log) == 0, log);
+            }
+            finally
+            {
+                Directory.Delete(work, recursive: true);
+            }
+        }
 
         foreach (var f in Fixtures)
         {

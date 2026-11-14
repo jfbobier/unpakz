@@ -7,6 +7,7 @@ using Unpakz.Tests.Support;
 namespace Unpakz.Tests;
 
 /// <summary>Compressed archives made by the real RAR 7.x must decode byte-identically (checked against the source files and unrar).</summary>
+[Collection("ArchiveSource")]
 public sealed class RarCompressedOracleTests : IDisposable
 {
     private readonly string _work = Oracle.NewWorkDir("rarc");
@@ -85,6 +86,94 @@ public sealed class RarCompressedOracleTests : IDisposable
         if (!Oracle.TryGetRar(out var rar, out _)) return;
         StandardMix();
         ExtractAndCompare(Pack(rar, $"-m{method}", "-s"), $"solid m{method}");
+    }
+
+    // ---- multi-volume sets made by the real rar ----
+    private string FirstVolume() => Path.Combine(_work, "a.part1.rar");
+
+    private string PackVolumes(string rar, params string[] switches)
+    {
+        foreach (var old in Directory.GetFiles(_work, "a.part*.rar")) File.Delete(old);
+        List<string> args = ["a", "-ma5", "-r", "-idq", "-y", "-ep1", .. switches, Path.Combine(_work, "a.rar"), "*"];
+        Assert.True(Oracle.Run(rar, args, Src, out var log) == 0, log);
+        var first = Directory.GetFiles(_work, "a.part*1.rar").OrderBy(f => f.Length).First();
+        return first;
+    }
+
+    private void ExtractSetAndCompare(string anyVolume, string label)
+    {
+        using var source = ArchiveSource.Open(anyVolume, new ArchiveLimits { MaxDictionarySize = 1L << 31 });
+        Assert.True(source.VolumePaths.Count > 1, $"{label}: the test needs a real multi-volume set");
+        var ours = Path.Combine(_work, "ours-" + Guid.NewGuid().ToString("N")[..6]);
+        ArchiveExtractor.Extract(source.Archive, ours, new ExtractOptions { Limits = new ArchiveLimits { MaxDictionarySize = 1L << 31 } });
+
+        var expected = Directory.GetFiles(Src, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(Src, f).Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
+        var actual = Directory.GetFiles(ours, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(ours, f).Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(expected, actual);
+        foreach (var rel in expected)
+        {
+            var a = SHA256.HashData(File.ReadAllBytes(Path.Combine(Src, rel)));
+            var b = SHA256.HashData(File.ReadAllBytes(Path.Combine(ours, rel)));
+            Assert.True(a.AsSpan().SequenceEqual(b), $"{label}: content differs: {rel}");
+        }
+    }
+
+    [Theory]
+    [InlineData("-m0", "-v200k")]
+    [InlineData("-m3", "-v100k")]
+    [InlineData("-m5", "-v64k")]
+    [InlineData("-m1", "-s", "-v150k")]
+    [InlineData("-m3", "-s", "-v40k")]
+    public void Volume_sets_extract_identically(params string[] switches)
+    {
+        if (!Oracle.TryGetRar(out var rar, out _)) return;
+        StandardMix();
+        Put("more.txt", TestData.Text(400_000, 5));
+        ExtractSetAndCompare(PackVolumes(rar, switches), string.Join(' ', switches));
+    }
+
+    [Fact]
+    public void A_set_can_be_opened_from_any_of_its_parts()
+    {
+        if (!Oracle.TryGetRar(out var rar, out _)) return;
+        Put("big.raw", TestData.Audio(900_000, 6));                    // text would compress ~100:1 into one volume
+        var first = PackVolumes(rar, "-m3", "-v100k");
+        var all = Directory.GetFiles(_work, "a.part*.rar").OrderBy(f => f, StringComparer.Ordinal).ToArray();
+        Assert.True(all.Length >= 3);
+        foreach (var part in new[] { all[0], all[all.Length / 2], all[^1] })
+            ExtractSetAndCompare(part, Path.GetFileName(part));
+        _ = first;
+    }
+
+    [Fact]
+    public void Filters_and_wrapping_windows_work_across_volume_boundaries()
+    {
+        if (!Oracle.TryGetRar(out var rar, out _)) return;
+        Put("code.bin", TestData.X86(2_000_000));
+        Put("audio.raw", TestData.Audio(1_000_000));
+        ExtractSetAndCompare(PackVolumes(rar, "-m3", "-md128k", "-mcE+", "-mc2D+", "-v30k"), "filters+wrap");
+    }
+
+    [Fact]
+    public void A_missing_or_damaged_volume_of_a_real_set_is_reported_not_guessed()
+    {
+        if (!Oracle.TryGetRar(out var rar, out _)) return;
+        Put("big.raw", TestData.Audio(600_000, 7));
+        var first = PackVolumes(rar, "-m3", "-v60k");
+        var parts = Directory.GetFiles(_work, "a.part*.rar").OrderBy(f => f, StringComparer.Ordinal).ToArray();
+        Assert.True(parts.Length >= 4);
+
+        var middle = parts[2];
+        var bytes = File.ReadAllBytes(middle);
+        File.Delete(middle);
+        var gone = Assert.Throws<ArchiveException>(() => ArchiveSource.Open(first));
+        Assert.Equal(ArchiveError.MissingVolume, gone.Error);
+
+        bytes[bytes.Length / 2] ^= 0x10;                       // put it back, damaged
+        File.WriteAllBytes(middle, bytes);
+        using var source = ArchiveSource.Open(first);
+        var ex = Assert.Throws<ArchiveException>(() => ArchiveExtractor.Extract(source.Archive, Path.Combine(_work, "ours")));
+        Assert.Equal(ArchiveError.Corrupt, ex.Error);
     }
 
     // ---- filters: forced on real data, and proven to have run ----

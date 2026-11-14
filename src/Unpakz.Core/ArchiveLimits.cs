@@ -8,6 +8,9 @@ public sealed class ArchiveLimits
     /// <summary>Maximum declared uncompressed size of a single entry (default 16 TiB).</summary>
     public long MaxEntrySize { get; init; } = 1L << 44;
 
+    /// <summary>Maximum number of volumes in a multi-volume set.</summary>
+    public int MaxVolumes { get; init; } = 65_536;
+
     /// <summary>Largest decompression window (dictionary) a decoder may allocate; bigger needs an explicit opt-in.</summary>
     public long MaxDictionarySize { get; init; } = 1L << 30;
 }

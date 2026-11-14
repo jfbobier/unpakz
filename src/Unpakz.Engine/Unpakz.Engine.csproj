@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- unsafe is confined to MappedFile (a pointer-backed MemoryManager over a memory-mapped view) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Unpakz.Core\Unpakz.Core.csproj" />
   </ItemGroup>

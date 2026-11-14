@@ -111,3 +111,6 @@ Reported Unsupported (explicitly, before any write): compressed methods, encrypt
 Next: RAR5 decoder (LZ + Huffman, filters delta/E8/E8E9/ARM, solid windows); reference = libarchive's BSD-2 RAR5 reader (fetch, read as data, credit);
 accept only when every `rar -m1..-m5` x dictionary x solid archive matches `unrar` output byte for byte. Then BLAKE2sp, AES-256; then RAR4 (VM filters, PPMd H).
 Also pending: SFX / prefixed archives, multi-volume.
+
+## Status pointer
+See docs/STATUS.md for the current, honest state (experimental; Linux-only verification; GUI not started; 2 GiB single-file limit).

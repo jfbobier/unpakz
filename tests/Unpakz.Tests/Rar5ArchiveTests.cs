@@ -179,29 +179,39 @@ public class Rar5ArchiveTests
     }
 
     [Fact]
-    public void Volumes_encrypted_headers_and_unknown_mandatory_blocks_are_unsupported()
+    public void Encrypted_headers_and_unknown_mandatory_blocks_are_unsupported()
     {
-        Assert.Equal(ArchiveError.Unsupported, OpenError(new Rar5Builder { ArchiveFlags = 0x01 | 0x02 }.AddFile("a", [1]).Build()));
         Assert.Equal(ArchiveError.Unsupported, OpenError(new Rar5Builder { OmitMain = true }.AddBlock(4, 0, new byte[40]).AddFile("a", [1]).Build()));
         Assert.Equal(ArchiveError.Unsupported, OpenError(new Rar5Builder().AddBlock(99, 0, [1]).AddFile("a", [1]).Build()));
     }
 
     [Fact]
-    public void Data_continued_from_or_into_another_volume_is_unsupported()
+    public void A_lone_volume_flagged_as_a_later_volume_is_a_missing_volume()
+    {
+        var ex = Assert.Throws<ArchiveException>(() => Open(new Rar5Builder { ArchiveFlags = 0x01 | 0x02 }.AddFile("a", [1]).Build()));
+        Assert.Equal(ArchiveError.MissingVolume, ex.Error);
+        Assert.Equal(1, ex.Volume);
+    }
+
+    [Fact]
+    public void Split_flags_that_nothing_satisfies_are_corrupt_in_a_single_archive()
     {
         foreach (var flag in new ulong[] { 0x08, 0x10 })
         {
             var rar = new Rar5Builder().AddBlock(2, flag, [], null).Build();
-            Assert.Contains(OpenError(rar), new[] { ArchiveError.Unsupported, ArchiveError.Corrupt });
+            Assert.Equal(ArchiveError.Corrupt, OpenError(rar));          // not even a complete file header
         }
 
         var cont = new Rar5Builder().AddFile("a", [1, 2, 3]).Build();
-        // set "data continues in next volume" (0x10) on the file header and re-sign it
         var blockStart = Rar5Builder.Signature.Length + MainBlockLength(cont);
-        var flagsPos = FlagsPosition(cont, blockStart);
-        cont[flagsPos] |= 0x10;
+        cont[FlagsPosition(cont, blockStart)] |= 0x10;                    // "continues in the next volume", but nothing follows
         Rar5Builder.FixHeaderCrc(cont, blockStart);
-        Assert.Equal(ArchiveError.Unsupported, OpenError(cont));
+        Assert.Equal(ArchiveError.Corrupt, OpenError(cont));
+
+        var before = new Rar5Builder().AddFile("a", [1, 2, 3]).Build();
+        before[FlagsPosition(before, blockStart)] |= 0x08;                // "continued from a previous volume": there is none
+        Rar5Builder.FixHeaderCrc(before, blockStart);
+        Assert.Equal(ArchiveError.Corrupt, OpenError(before));
     }
 
     private static int MainBlockLength(byte[] rar)

@@ -27,6 +27,20 @@ public static class ArchiveExtractor
         return Extract(archive, destination, options, fileSystem, progress, cancellationToken);
     }
 
+    /// <summary>Extracts a multi-volume set (first volume first).</summary>
+    public static ExtractionResult Extract(
+        IReadOnlyList<ReadOnlyMemory<byte>> volumes,
+        string destination,
+        ExtractOptions? options = null,
+        IFileSystem? fileSystem = null,
+        IProgress<ExtractionProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var archive = ArchiveReader.Open(volumes, (options ?? new ExtractOptions()).Limits);
+        return Extract(archive, destination, options, fileSystem, progress, cancellationToken);
+    }
+
     public static ExtractionResult Extract(
         IArchive archive,
         string destination,
