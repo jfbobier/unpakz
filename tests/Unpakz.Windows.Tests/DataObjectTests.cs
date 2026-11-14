@@ -135,7 +135,6 @@ public sealed class DataObjectTests : IDisposable
         using (vm) using (obj)
         {
             var folder = drag.Items.ToList().FindIndex(i => i.IsDirectory);
-            Assert.True(folder >= 0, "the drag list must contain a folder for this check to mean anything");
             foreach (var index in new[] { folder, -1, drag.Items.Count, 9999 })
             {
                 var f = Format("FileContents", TYMED.TYMED_ISTREAM, index);
@@ -208,6 +207,17 @@ public sealed class DataObjectTests : IDisposable
             copy.Next(1, one, null!);
             Assert.Equal(all[0], one[0].cfFormat);
         }
+    }
+
+    [Fact]
+    public void A_folder_item_never_yields_contents_even_if_the_opener_would_happily_produce_a_stream()
+    {
+        VirtualFile[] items = [new("docs", true, 0, null, 0), new("docs\\a.txt", false, 3, null, 1)];
+        using var obj = new VirtualFileDataObject(items, _ => new MemoryStream([1, 2, 3]));
+        var f = Format("FileContents", TYMED.TYMED_ISTREAM, 0);
+        var ex = Assert.Throws<COMException>(() => ((ComIDataObject)obj).GetData(ref f, out _));
+        Assert.Equal(unchecked((int)0x80040068), ex.HResult);                                 // DV_E_LINDEX
+        Assert.NotNull(GetContents(obj, 1));                                                  // the file next to it is fine
     }
 
     [Fact]

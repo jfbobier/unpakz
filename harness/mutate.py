@@ -68,6 +68,12 @@ if flt.startswith("="):
 else:
     selected = [m for m in MUTANTS if flt in m[0] or flt in m[1]]
 t0 = time.time()
+# A kill only means something if the unmodified tree passes. Check that first, so a red baseline cannot masquerade as a killed mutant.
+baseline, baseline_out = run_tests()
+if baseline != "survived":
+    print(f"BASELINE IS NOT GREEN (verdict: {baseline}); no mutant can be judged. Fix the tree first.")
+    print(baseline_out[-1500:])
+    sys.exit(4)
 for mid, rel, find, repl in selected:
     path = os.path.join(ROOT, rel)
     with open(path, encoding="utf-8", newline="") as f:
