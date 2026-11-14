@@ -124,3 +124,16 @@ checksum are refused, malformed extra records are refused, file versions are kep
 
 The mutation runner refuses to judge on a red baseline. Mutants that cannot change behaviour (defence in depth behind a libarchive check that
 already fires) are listed with the reason in `harness/native_mutations.py`.
+
+## The managed layers (since 0.2)
+
+| Layer | Where | What it proves |
+|---|---|---|
+| Interop over the real native library | `tests/Unpakz.Interop.Tests` (net10, Linux and Windows; the library is found by `Env.cs`) | P/Invoke surface, typed errors, callbacks and cancellation, entry streaming, selection, naming, friendly errors, drag list, `FileGroupDescriptor` bytes, registration plan |
+| View-models and CLI over the real native library | same project (`ViewModelTests`, `CliTests`; `CliApp.cs` is compiled into the tests) | open/extract flows, overwrite prompt, cancel, hostile archive, drag stream, file list sorting/filtering/selection, exit codes |
+| Windows (.NET Framework 4.8) | `tests/Unpakz.Windows.Tests` | COM data object called only through `IDataObject`/`IStream`; real registry (scratch key); the real forms at 4 font scales x 3 sizes in 5 states with PNG screenshots (`ui-shots/`), real button clicks |
+
+Fixtures: `tests/fixtures/` (small `.rar` files made by the real `rar` 7.23, incl. solid, forced filters and three multi-volume sets). Shared builders (`tests/Support`) write ZIP and RAR5
+independently of the code under test.
+
+The retired C# stack (`Unpakz.Core`/`Engine`, 677 tests, 379 mutants) is in git history before 0.2.0.

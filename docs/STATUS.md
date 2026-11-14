@@ -1,45 +1,36 @@
-# Status (2026-11-14) – EXPERIMENTAL, mid-migration to the native backend
+# Status (2026-11-14) – v0.2.0, EXPERIMENTAL
 
-Direction (user, 2026-11-14; `docs/decisions/0003`, `0004`): Windows 11 only; a C++ DLL (`native/`, MSVC, libarchive + our RAR5 reader) does all
-archive work; front ends are .NET Framework 4.8 (UI and CLI); formats ZIP/ZIP64 (>2 GiB), tar.gz, RAR4, RAR5; licence BSD-2-Clause.
+Architecture (user decisions, `docs/decisions/0003`, `0004`, `0005`): Windows 11 only; C++ backend DLL (`unpakz_native.dll`, MSVC) that does all archive work
+(libarchive + our RAR5 reader); .NET Framework 4.8 front ends (WinForms app, CLI) over a netstandard2.0 interop layer; ZIP/ZIP64 (>2 GiB), tar.gz, RAR4,
+RAR5; BSD-2-Clause. The C# net10 engine of 0.1.0 is retired.
 
-## Where things are
-
-| Piece | State |
-|---|---|
-| `native/` backend DLL (`unpakz.dll`, 7 exported C functions, ABI v1) | **works**; built with MSVC on Windows and clang/gcc on WSL |
-| Formats | ZIP (stored/deflate, ZIP64 verified with a 5 GiB entry), tar.gz, RAR4 (libarchive), RAR5 (our reader: stored, methods 1-5, solid, filters, multi-volume, BLAKE2sp) |
-| Guard, limits, single-write sink, pre-flight pass, selection filter, cancel, progress | in `native/src` (guard.cpp, engine.cpp, fs_native.cpp), C ABI in `api.cpp` |
-| Managed front ends | **not migrated yet**: the released 0.1.0 app/CLI still run on the retired C# net10 engine. `src/Unpakz.Interop` (net48 P/Invoke layer) is written but not yet built or tested |
-| Drag-out of virtual files | needs one more native call (stream one entry); not written yet |
-| C# net10 Core/Engine | kept as the comparison oracle until the native backend passes the same corpus, then retired (decision 0003.6) |
-
-## Measured
+## Measured (all run on 2026-11-14)
 
 | Check | Result |
 |---|---|
-| `./harness.sh native` (ASan + UBSan, warnings as errors) | 7 test executables pass (~60 s): guard 15, engine 41, API 11, volumes 7, rar5 fixtures 10, rar5 container/volumes 56, rar5 decoder 55 tests |
-| MSVC on Windows (`scripts/native-win.ps1`, Release, `/W4 /WX`, static CRT) | the same 7 pass |
-| `unpakz.dll` called from Windows PowerShell (CLR 4.0, i.e. .NET Framework) via P/Invoke (`scripts/dll-smoke.ps1`) | ABI 1, extracted a zip with a non-ASCII name |
-| Differential conformance (`harness/conformance.py`) | all fixtures, freshly generated rar -ma5 (m0-m5, solid, md4m, filters, multi-volume), zip, 7z-zip, tar.gz identical to `unrar` / 7-Zip / `tar` |
-| Third-party corpus (102 RAR vectors incl. libarchive's security regressions) | every file: same result as `unrar`, or a typed refusal, or a documented decision (`KNOWN` in the script); no crash, no hang |
-| Native mutation catalogue | 210 mutants (guard, engine, RAR5 container, decoder, filters); every mutant killed or listed in `EQUIVALENT` with its reason (20) |
-| C# side (unchanged since 0.1.0) | 677 + 153 tests, 379 mutants |
+| `./harness.sh fast` (WSL) | native tests (optimised build) pass; managed build with warnings as errors; 68 managed tests over the real native library pass |
+| `./harness.sh native` (WSL, ASan + UBSan, warnings as errors) | 7 native test programs pass: guard 15, engine 41, API 13, volumes 7, rar5 fixtures 11, rar5 container/volumes 56, rar5 decoder 55 |
+| `.\harness.ps1 fast` (Windows 11, MSVC Release `/W4 /WX`, .NET Framework 4.8 and .NET 10 test hosts) | the same 7 native programs pass; 68 managed tests pass; 21 Windows tests pass (COM data object, registry, real windows at 4 font scales x 3 sizes in 5 states, real button clicks) |
+| Packaged zips smoke-tested from a clean folder (`scripts/package.ps1`) | CLI extracted zip (non-ASCII name), tar.gz and a solid RAR5, `t` and `l` work; the app starts with an archive argument and keeps running |
+| Differential conformance (`harness/conformance.py`) | fixtures, freshly generated `rar -ma5` (m0-m5, solid, md4m, filters, multi-volume), zip, 7z-zip, tar.gz identical to `unrar` / 7-Zip / `tar` |
+| Third-party corpus (102 RAR vectors incl. libarchive's security regressions) | each file: same result as `unrar`, or a typed refusal, or a documented decision (`KNOWN` in the script); no crash, no hang |
+| Native mutation catalogue | 210 mutants; each killed or listed in `EQUIVALENT` with its reason (20). Guard/engine mutants were judged on the ASan build, RAR5 mutants on an optimised build (three sanitizer-only ones checked on ASan) |
+| ZIP64 | an opt-in test extracts a 5 GiB entry (`UNPAKZ_BIG=1`) |
 
-Honest caveats
-* The native mutation run was done in pieces while the catalogue grew; the 129 RAR5 mutants were judged on an optimised (non-sanitizer) build, the
-  three that only a sanitizer can see were checked on the ASan build. The guard/engine mutants were judged on the ASan build earlier and not rerun after
-  the RAR5 work touched `engine.cpp`'s reader plumbing (the engine tests did rerun and pass).
-* Names without an encoding flag are read as UTF-8 (libarchive `hdrcharset=UTF-8`, with a per-call UTF-8 thread locale). Old zips in an OEM code
-  page are refused rather than guessed. A retry with the OEM code page is the planned fix.
-* RAR4 goes through libarchive: its VM-filter edge case `rar_filter_incomplete_block.rar` is refused (unrar extracts it). RAR4 archives cannot be
-  generated here (`rar` 7.x dropped `-ma4`), so RAR4 coverage is the 28 third-party vectors.
-* Encryption is refused everywhere (typed `Unsupported`). RAR entries without any checksum are refused. Links are never created.
-* Not done: SFX / prefixed archives, tar.bz2/xz/zstd, parallel pipeline, the C++ hardware CRC (zlib-ng's `crc32` is used, already SIMD), windowed
-  access for archives that do not fit in memory is not needed (files are read positionally) but has not been stress-tested beyond the 5 GiB zip.
+## Honest caveats
 
-## Next, in order
-1. Native: `unpakz_read_entry` (push the bytes of one entry to a callback) for drag-out; OEM-code-page retry for zip names.
-2. Managed: build `Unpakz.Interop` (net48), add the entry-stream bridge, retarget `Unpakz.Presentation`, the WinForms app, the COM layer and the CLI to
-   net48 over the interop layer; port the view-model/UI matrix tests; run them against the native DLL.
-3. Retire the C# Core/Engine once the managed tests pass on the native backend; publish `0.2.0` (x64, unpakz.dll + net48 exe, nothing to install).
+* Real OLE drag into Explorer is **not verified** (injected input cannot start a drag on the test machine). The data object is tested through
+  `IDataObject`/`IStream`, and entries stream through `unpakz_read_entry`.
+* The guard/engine native mutants were not rerun after the RAR5 work touched the reader plumbing in `engine.cpp`; the engine tests were, and pass.
+* The managed C# mutation catalogue (379 mutants) was retired with the C# engine; the new managed layer has tests but no mutation run yet.
+* The managed unit tests run against the native library through P/Invoke; the Windows UI tests ran on this one machine.
+* Names without an encoding flag are read as UTF-8 (per-call UTF-8 thread locale); OEM-code-page zips are refused rather than guessed.
+* RAR4 goes through libarchive; the VM-filter edge case `rar_filter_incomplete_block.rar` is refused. RAR4 files cannot be generated here
+  (`rar` 7.x dropped `-ma4`): coverage is the 28 third-party vectors.
+* Encryption is refused everywhere; RAR entries without any checksum are refused; links are never created.
+* No performance benchmarks of the new backend yet (zlib-ng is SIMD; the RAR5 decoder is a straight port, untuned).
+* Not done: SFX / prefixed archives, split ZIP, tar.bz2/xz/zstd, plain `.gz`, OEM-codepage retry for zip names, a "packed size" column.
+
+## Next
+1. A real drag-and-drop observation on a desktop session (or a UIA-driven test), and a benchmark pass on large archives (benchmark first, per CLAUDE.md rule 5).
+2. A mutation run for the managed layer, and an OEM-codepage retry for old zips.
