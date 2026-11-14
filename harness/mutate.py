@@ -33,6 +33,7 @@ def run_tests(rel=None):
     """Returns (verdict, output). Verdicts: killed, survived, invalid, hang. Anything else is an infrastructure failure and aborts the run."""
     if MODE == "native":
         cmd = ["bash", "scripts/native-test.sh"]
+        os.environ.setdefault("UNPAKZ_NATIVE_BUILD", "release")      # mutants are judged on the fast build; the sanitizer build is run by ./harness.sh native
         limit = TIMEOUT * 2
         if rel and rel.endswith("rar5.cpp"): os.environ["UNPAKZ_CTEST_FILTER"] = "rar5_test|rar5_container_test|rar5_decoder_test|api_test"
         else: os.environ.pop("UNPAKZ_CTEST_FILTER", None)

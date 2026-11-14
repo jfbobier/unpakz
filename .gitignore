@@ -12,3 +12,4 @@ bin-win/
 artifacts/
 native/build*/
 native/build-linux*
+native/build-release*
