@@ -59,4 +59,19 @@ public class Crc32Tests
             data[i / 8] ^= (byte)(1 << (i % 8));
         }
     }
+
+    [Fact]
+    public void Hardware_and_software_paths_agree_for_every_length_around_the_fold_boundaries_and_any_seed()
+    {
+        if (!Crc32.HardwareSupported) return;       // nothing to compare on a CPU without PCLMULQDQ
+        var data = new byte[1200];
+        new Random(11).NextBytes(data);
+        foreach (var seed in new uint[] { 0, 1, 0xFFFFFFFF, 0xDEADBEEF })
+            for (var offset = 0; offset < 3; offset++)
+                for (var len = 0; len <= 1100; len++)
+                {
+                    var span = data.AsSpan(offset, len);
+                    Assert.Equal(Crc32.UpdateSoftware(seed, span), Crc32.Update(seed, span));
+                }
+    }
 }

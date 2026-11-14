@@ -4,9 +4,9 @@ Measured on the build in this repository: Linux/WSL (.NET 10.0.114) and Windows 
 
 | Check | Result |
 |---|---|
-| `./harness.sh fast` (Linux) | 676 tests pass, warnings-as-errors build |
+| `./harness.sh fast` (Linux) | 677 tests pass, warnings-as-errors build |
 | Windows solution (`Unpakz.Windows.slnx`) | the same 676 + 153 Windows-only tests pass (COM data object, registry, UI matrix and clicks) |
-| Mutation catalogue | 372 mutants; full strict run on 2026-11-14: Linux 334 (313 killed, 16 survived of which 10 are justified equivalents, 5 did not compile), Windows COM 5 and UI 12 |
+| Mutation catalogue | 379 mutants (7 hardware-CRC mutants added after the full run, all killed individually); full strict run on 2026-11-14: Linux 334 (313 killed, 16 survived of which 10 are justified equivalents, 5 did not compile), Windows COM 5 and UI 12 |
 | After triage | every unaccepted survivor now has a test and is killed (re-run individually); every uncompilable mutant was repaired and re-run; 10 equivalents are listed with reasons in `harness/mutations.py` |
 
 Honest caveats:
@@ -27,4 +27,4 @@ to named folder, file list with selection, drag-out of virtual files); per-user 
 ## Not done
 RAR4, AES (ZIP and RAR), BLAKE2sp-only integrity, SFX/prefixed archives, split ZIP, Deflate64/bzip2/LZMA/zstd; archives over 2 GiB
 as a single file (clear error, use volumes); per-part CRCs of non-final RAR volumes; parallel pipeline; decoder tuning.
-Benchmarks and the Vulkan experiment: see `bench/` once present.
+Benchmarks and the Vulkan experiment: see `bench/README.md` (hardware CRC shipped, ~8x; GPU CRC measured 3.8x *slower* than one CPU core on the Radeon 780M, so no GPU code; the Nvidia desktop was not tested).

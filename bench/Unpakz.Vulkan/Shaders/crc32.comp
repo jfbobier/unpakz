@@ -1,0 +1,45 @@
+#version 450
+// CRC-32 (IEEE, reflected) of independent chunks. Each invocation walks one chunk; the host combines the partial CRCs.
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly buffer InputData { uvec4 words[]; };
+layout(std430, binding = 1) writeonly buffer Partials { uint partial[]; };
+
+layout(push_constant) uniform Params
+{
+    uint chunkWords;   // 128-bit words (16 bytes) per chunk
+    uint chunkCount;
+} pc;
+
+shared uint table[256];
+
+void main()
+{
+    for (uint i = gl_LocalInvocationID.x; i < 256u; i += 64u)
+    {
+        uint c = i;
+        for (int k = 0; k < 8; k++) c = ((c & 1u) != 0u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+        table[i] = c;
+    }
+    barrier();
+
+    uint chunk = gl_GlobalInvocationID.x;
+    if (chunk >= pc.chunkCount) return;
+
+    uint crc = 0xFFFFFFFFu;
+    uint baseIndex = chunk * pc.chunkWords;
+    for (uint w = 0u; w < pc.chunkWords; w++)
+    {
+        uvec4 q = words[baseIndex + w];
+        for (int k = 0; k < 4; k++)
+        {
+            uint v = q[k];
+            crc = table[(crc ^ v) & 0xFFu] ^ (crc >> 8);
+            crc = table[(crc ^ (v >> 8)) & 0xFFu] ^ (crc >> 8);
+            crc = table[(crc ^ (v >> 16)) & 0xFFu] ^ (crc >> 8);
+            crc = table[(crc ^ (v >> 24)) & 0xFFu] ^ (crc >> 8);
+        }
+    }
+
+    partial[chunk] = ~crc;   // the finalised CRC of this chunk alone
+}

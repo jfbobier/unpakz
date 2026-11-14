@@ -428,6 +428,14 @@ MUTANTS = [
     ("UI10", FLF, "_extract.Enabled = n > 0 && !_main.IsBusy;", "_extract.Enabled = true;"),
     ("UI11", MFM, "_extractNamed.Enabled = idle;", "_extractNamed.Enabled = true;"),
     ("UI12", MFM, "if (_list is { IsDisposed: false }) { _list.Activate(); return; }", ""),
+    # --- hardware CRC (PCLMULQDQ folding)
+    ("H1", CRC, "0x01751997d0UL", "0x01751997d1UL"),
+    ("H2", CRC, "var simdLength = data.Length & ~15;", "var simdLength = data.Length & ~7;"),
+    ("H3", CRC, " ^ Vector128.CreateScalar(state).AsUInt64();", ";"),
+    ("H4", CRC, "x4 = FoldStep(x4, K1K2,", "x4 = FoldStep(x4, K3K4,"),
+    ("H5", CRC, "UpdateSoftware(~state, data[simdLength..])", "UpdateSoftware(~state, data[(simdLength + 1)..])"),
+    ("H6", CRC, "data.Length < HardwareMinimum) return UpdateSoftware", "data.Length < 0) return UpdateSoftware"),
+    ("H7", CRC, "t = Pclmulqdq.CarrylessMultiply(t, Poly, 0x10);", "t = Pclmulqdq.CarrylessMultiply(t, Poly, 0x00);"),
     # --- DOS time
     ("D2", DOS, "if (day > DateTime.DaysInMonth(year, month)) return false;", ""),
     ("D3", DOS, "hour > 23", "hour > 24"),

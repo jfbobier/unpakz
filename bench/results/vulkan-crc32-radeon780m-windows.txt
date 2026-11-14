@@ -1,0 +1,8 @@
+# Vulkan CRC-32 experiment, 2026-11-14 -- AMD Radeon 780M iGPU (Ryzen 7 PRO 7840U laptop), Windows, Silk.NET.Vulkan 2.22.0, 128 MiB random data, 9 iterations (median)
+
+== AMD Radeon(TM) 780M (IntegratedGpu), maxStorageBufferRange 4095 MiB
+   correct: True (gpu 966C324E, cpu 966C324E)
+   copy to GPU-visible memory 6.18 ms | kernel 30.75 ms | combine 1.23 ms | total 38.16 ms
+
+CPU (Crc32.Update, PCLMULQDQ): median 10.13 ms for 128 MiB = 13246 MB/s
+AMD Radeon(TM) 780M: copy 21721 MB/s, kernel alone 4365 MB/s, end-to-end 3518 MB/s, correct=True

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- BenchmarkDotNet: benchmarking harness, MIT licence, bench-only (never shipped). -->
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+    <ProjectReference Include="..\..\src\Unpakz.Core\Unpakz.Core.csproj" />
+  </ItemGroup>
+</Project>

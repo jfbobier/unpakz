@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Experiment tool, never shipped: raw Vulkan interop trips many analyzers. See docs/decisions/0002-vulkan-experiment-relaxed-analyzers.md -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Silk.NET.Vulkan: Vulkan bindings for .NET, MIT licence, experiment-only. -->
+    <PackageReference Include="Silk.NET.Vulkan" Version="2.22.0" />
+    <ProjectReference Include="..\..\src\Unpakz.Core\Unpakz.Core.csproj" />
+    <None Include="Shaders\crc32.spv" Link="crc32.spv" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

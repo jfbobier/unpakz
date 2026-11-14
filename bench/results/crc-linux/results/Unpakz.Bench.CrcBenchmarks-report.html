@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>Unpakz.Bench.CrcBenchmarks-20261114-072517</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.8, Linux Arch Linux
+AMD Ryzen 7 PRO 7840U w/ Radeon 780M Graphics 3.29GHz, 1 CPU, 16 logical and 8 physical cores
+.NET SDK 10.0.114
+  [Host]   : .NET 10.0.14 (10.0.14, 42.42.42.42424), X64 RyuJIT x86-64-v4
+  ShortRun : .NET 10.0.14 (10.0.14, 42.42.42.42424), X64 RyuJIT x86-64-v4
+</code></pre>
+<pre><code>Job=ShortRun  IterationCount=3  LaunchCount=1  
+WarmupCount=3  
+</code></pre>
+
+<table>
+<thead><tr><th>Method</th><th>Size</th><th>Mean      </th><th>Error     </th><th>StdDev </th><th>Ratio</th><th>Gen0</th><th>Gen1</th><th>Gen2</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>SlicingBy8</td><td>4096</td><td>2,507.9 ns</td><td>171.38 ns</td><td>9.39 ns</td><td>1.00</td><td>-</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>Pclmulqdq</td><td>4096</td><td>321.3 ns</td><td>38.08 ns</td><td>2.09 ns</td><td>0.13</td><td>-</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>MemoryCopy</td><td>4096</td><td>249.7 ns</td><td>542.66 ns</td><td>29.74 ns</td><td>0.10</td><td>0.4923</td><td>-</td><td>-</td><td>4120 B</td><td>NA</td>
+</tr><tr><td>SlicingBy8</td><td>1048576</td><td>641,668.9 ns</td><td>108,011.25 ns</td><td>5,920.46 ns</td><td>1.00</td><td>-</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>Pclmulqdq</td><td>1048576</td><td>82,177.4 ns</td><td>6,757.00 ns</td><td>370.37 ns</td><td>0.13</td><td>-</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>MemoryCopy</td><td>1048576</td><td>245,239.5 ns</td><td>31,486.84 ns</td><td>1,725.90 ns</td><td>0.38</td><td>220.4590</td><td>220.4590</td><td>220.4590</td><td>1048667 B</td><td>NA</td>
+</tr><tr><td>SlicingBy8</td><td>268435456</td><td>174,069,076.1 ns</td><td>15,034,192.46 ns</td><td>824,074.82 ns</td><td>1.00</td><td>-</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>Pclmulqdq</td><td>268435456</td><td>21,399,718.2 ns</td><td>2,252,220.38 ns</td><td>123,451.80 ns</td><td>0.12</td><td>-</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>MemoryCopy</td><td>268435456</td><td>56,263,443.7 ns</td><td>17,441,673.78 ns</td><td>956,037.00 ns</td><td>0.32</td><td>166.6667</td><td>166.6667</td><td>166.6667</td><td>268435532 B</td><td>NA</td>
+</tr></tbody></table>
+</body>
+</html>
