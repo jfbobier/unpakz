@@ -43,6 +43,8 @@ MUTANTS = [
     ("NG36", GD, "if (i + len > in.size()) return false;", ""),
     ("NG37", GD, "b0 >= 0xF0 && b0 <= 0xF4", "b0 >= 0xF0 && b0 <= 0xF7"),
     # --- engine: planning and refusal
+    ("NE40", EN, "if (e.info.relative_path.empty() && e.rejection == PathRejection::Empty && e.info.kind == EntryKind::Directory) return {Action::Skip, std::nullopt};", ""),
+    ("NE41", EN, "e.rejection == PathRejection::Empty && e.info.kind == EntryKind::Directory) return", "e.rejection == PathRejection::Empty) return"),
     ("NE1", EN, "if (e.info.relative_path.empty())", "if (false)"),
     ("NE2", EN, "if (e.info.kind == EntryKind::Symlink || e.info.kind == EntryKind::Hardlink) return {Action::Skip, SkipReason::Link};", ""),
     ("NE3", EN, "if (e.info.kind == EntryKind::Special) return {Action::Skip, SkipReason::Special};", ""),

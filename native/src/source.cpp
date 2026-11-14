@@ -105,6 +105,9 @@ Reader open_reader(const ArchiveSource& source, const Limits& limits) {
     archive_read_support_format_rar(a);
     archive_read_support_format_rar5(a);
     archive_read_support_filter_gzip(a);                  // tar.gz; no program-spawning filters, ever
+    // Names without an explicit encoding are read as UTF-8 (what Info-ZIP, 7-Zip and tar on modern systems write). Archives from legacy
+    // tools in an OEM code page are refused with a clear error rather than guessed; see docs/STATUS.md.
+    archive_read_set_options(a, "hdrcharset=UTF-8");
 
     if (source.data != nullptr || source.files.empty()) {
         if (archive_read_open_memory(a, source.data, source.size) != ARCHIVE_OK) throw_reader_error(a, "cannot read archive");

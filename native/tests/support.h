@@ -15,6 +15,7 @@
 
 #include "../src/engine.h"
 #include "../src/guard.h"
+#include "../src/scoped_locale.h"
 #include "test.h"
 
 namespace tsupport {
@@ -25,6 +26,15 @@ inline std::u16string W(const char* utf8) {
     std::u16string o;
     if (!utf8_to_utf16(utf8, o)) throw std::runtime_error("bad utf8 in test");
     return o;
+}
+
+// Parent directory of a path, keeping the separator of a drive root ("c:\\" not "c:").
+inline std::u16string parent_dir(const std::u16string& p) {
+    auto sep = p.find_last_of(u"/\\");
+    if (sep == std::u16string::npos) return {};
+    if (sep == 0) return p.substr(0, 1);
+    if (sep == 2 && p[1] == u':') return p.substr(0, 3);
+    return p.substr(0, sep);
 }
 
 inline std::u16string fold(const std::u16string& s) {
@@ -93,8 +103,7 @@ public:
     void create_directory(const std::u16string& path) override {
         create_dir_calls.push_back(path);
         auto k = fold(path);
-        auto sep = k.find_last_of(u"/\\");
-        if (sep == std::u16string::npos || !dirs.count(k.substr(0, sep == 0 ? 1 : sep))) throw Error(Status::Io, "parent directory missing");
+        if (!dirs.count(parent_dir(k))) throw Error(Status::Io, "parent directory missing");
         if (files.count(k)) throw Error(Status::Conflict, "a file exists at the directory path");
         if (dirs.insert(k).second) created_dirs.push_back(path);
     }
@@ -135,10 +144,9 @@ private:
 
 inline std::unique_ptr<IFileWriter> MemoryFs::create_file(const std::u16string& final_path, std::uint64_t preallocate) {
     preallocations.push_back(preallocate);
-    auto sep = final_path.find_last_of(u"/\\");
-    auto dir = final_path.substr(0, sep == 0 ? 1 : sep);
+    auto dir = parent_dir(final_path);
     if (!dirs.count(fold(dir))) throw Error(Status::Io, "directory missing");
-    std::u16string temp = dir + kNativeSeparator + u".unpakz-" + std::u16string(1, static_cast<char16_t>(u'a' + (temp_counter++ % 26))) + u".tmp";
+    std::u16string temp = dir + (dir.back() == kNativeSeparator ? std::u16string() : std::u16string(1, kNativeSeparator)) + u".unpakz-" + std::u16string(1, static_cast<char16_t>(u'a' + (temp_counter++ % 26))) + u".tmp";
     temp += std::u16string(1, static_cast<char16_t>(u'0' + temp_counter % 10));
     files[fold(temp)] = {};
     temp_files.emplace_back(temp, final_path);
@@ -167,7 +175,7 @@ inline la_ssize_t write_cb(struct archive*, void* ctx, const void* b, size_t n) 
 }
 
 inline std::vector<std::uint8_t> build(const std::vector<Ent>& ents, bool zip, bool deflate = true) {
-    std::setlocale(LC_ALL, "C.UTF-8");
+    unpakz::ScopedUtf8Locale utf8_names;
     WriteCtx ctx;
     struct archive* a = archive_write_new();
     if (zip) {

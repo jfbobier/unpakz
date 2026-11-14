@@ -11,8 +11,6 @@
 #include "platform.h"
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <windows.h>
 #include <rpc.h>
 #else
@@ -189,7 +187,7 @@ public:
         WIN32_FILE_ATTRIBUTE_DATA d;
         if (!GetFileAttributesExW(platform::win_path(path).c_str(), GetFileExInfoStandard, &d)) {
             auto e = GetLastError();
-            if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND || e == ERROR_NOT_A_DIRECTORY) return PathKind::None;
+            if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND || e == ERROR_DIRECTORY) return PathKind::None;
             throw Error(Status::Io, "cannot inspect path (Windows error " + std::to_string(e) + ")");
         }
         if (d.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) return PathKind::ReparsePoint;

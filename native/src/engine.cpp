@@ -4,11 +4,10 @@
 #include <set>
 #include <unordered_set>
 
+#include "scoped_locale.h"
 #include "reader.h"
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <windows.h>
 #endif
 
@@ -141,6 +140,9 @@ public:
     Decision add(const Entry& e) {
         if (++seen_ > limits_.max_entries) throw Error(Status::LimitExceeded, "the archive has too many entries");
         if (filter_ && !filter_(e.info)) return {Action::Skip, std::nullopt};
+
+        // The archive root itself ("./" in tar, an empty folder name in some zips) is a harmless no-op, not an attack.
+        if (e.info.relative_path.empty() && e.rejection == PathRejection::Empty && e.info.kind == EntryKind::Directory) return {Action::Skip, std::nullopt};
 
         if (e.info.relative_path.empty())
             throw Error(Status::UnsafePath, "the entry '" + narrow(e.info.name) + "' " + rejection_text(e.rejection));
@@ -419,11 +421,13 @@ private:
 }  // namespace
 
 Result extract_archive(const ArchiveSource& source, const std::u16string& destination, const Options& options) {
+    ScopedUtf8Locale utf8_names;
     Extractor x(source, destination, options);
     return x.run();
 }
 
 std::vector<EntryInfo> list_archive(const ArchiveSource& source, const Limits& limits) {
+    ScopedUtf8Locale utf8_names;
     auto reader = open_reader(source, limits);
     std::unique_ptr<archive_entry, decltype(&archive_entry_free)> e(archive_entry_new(), archive_entry_free);
     std::vector<EntryInfo> out;

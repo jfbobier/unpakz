@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
+  add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
@@ -82,3 +83,7 @@ if(MSVC)
 else()
   target_compile_options(unpakz PRIVATE -Wall -Wextra -Wpedantic -Werror -Wconversion -Wshadow)
 endif()
+
+# Test driver over the shared library's C API (not shipped).
+add_executable(unpakz_testcli tools/unpakz_testcli.cpp src/guard.cpp)
+target_link_libraries(unpakz_testcli PRIVATE unpakz)
