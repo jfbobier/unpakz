@@ -2,6 +2,7 @@
 // hostile headers, sizes that wrap, volume sequencing, and sweeps over fixed-up header CRCs.
 #include "../src/rar5.h"
 #include "rar5_builder.h"
+#include "rar5_stream_builder.h"
 #include "support.h"
 
 extern "C" {
@@ -636,6 +637,133 @@ TEST(every_truncation_and_corruption_of_every_volume_is_handled) {
         for (std::size_t i = 0; i < vols[v].size(); ++i)
             for (std::uint8_t mask : {0x01, 0x80, 0xFF}) { auto set = vols; set[v][i] ^= mask; try_set(set); }
     }
+}
+
+// ---------------------------------------------------------------- messages name the real problem (not a knock-on error)
+
+static std::string open_message(const Bytes& rar, const Limits& l = {}) {
+    try { open1(rar, l); } catch (const Error& e) { return e.what(); }
+    return {};
+}
+static bool has(const std::string& text, const char* needle) { return text.find(needle) != std::string::npos; }
+
+TEST(errors_name_the_actual_problem) {
+    { Rar5Builder b; b.omit_end = true; b.trailing = {1, 2, 3}; b.add_file("a", {1});                 // fewer than 5 bytes where a block header should start
+      CHECK(has(open_message(b.build()), "Truncated RAR block header")); }
+    {   // a block whose header size is zero, correctly signed: refused for its size, not for failing to parse an empty header
+        Bytes archive = Rar5Builder::signature;
+        { Rar5Builder tmp; auto main = tmp.build(); archive.assign(main.begin(), main.begin() + static_cast<std::ptrdiff_t>(Rar5Builder::signature.size() + main_block_length(main))); }
+        Bytes sized = vint(0);
+        append(archive, u32(crc_of(sized))); append(archive, sized);
+        CHECK(has(open_message(archive), "out of range")); }
+    {   // header exactly at the 2 MiB maximum is fine; one byte more is "out of range"
+        auto exact = Rar5Builder().add_block(99, 0x04, Bytes(2097150, 0)).add_file("a", {1}).build();
+        CHECK(open_status(exact) == Status::Ok);
+        auto over = Rar5Builder().add_block(99, 0x04, Bytes(2097151, 0)).add_file("a", {1}).build();
+        CHECK(has(open_message(over), "out of range")); }
+    {   FileOpts huge; huge.data_size_field = 1ull << 40;
+        auto rar = Rar5Builder().add_file("a", {1, 2, 3}, huge).build();
+        CHECK(has(open_message(rar), "data area extends past")); }
+    {   FileOpts huge_header;                                                                          // a header that claims more bytes than the archive has
+        auto rar = Rar5Builder().add_file("a", {1}).build();
+        auto p = Rar5Builder::signature.size() + main_block_length(rar) + 4;
+        Bytes patched(rar.begin(), rar.begin() + static_cast<std::ptrdiff_t>(p)); append(patched, vint(2'000'000)); patched.insert(patched.end(), rar.begin() + static_cast<std::ptrdiff_t>(p) + 1, rar.end());
+        CHECK(has(open_message(patched), "extends past the archive")); }
+    {   FileOpts nl; nl.name_len_field = 1000;
+        CHECK(has(open_message(Rar5Builder().add_file("abc", {1}, nl).build()), "overruns its header")); }
+    {   FileOpts e1; e1.extras = {Bytes{0x00}};
+        CHECK(has(open_message(Rar5Builder().add_file("x", {1}, e1).build()), "Malformed RAR extra record")); }
+    {   FileOpts e2; e2.extras = {Bytes{0x7F, 0x01}};
+        CHECK(has(open_message(Rar5Builder().add_file("x", {1}, e2).build()), "Malformed RAR extra record")); }
+}
+
+// ---------------------------------------------------------------- dictionary / window accounting
+
+static Bytes compressed_file_archive(int dictionary_log, std::uint64_t declared_unpacked, bool solid_flag = false) {
+    FileOpts o; o.method = 3; o.dictionary_log = dictionary_log; o.unpacked_override = declared_unpacked; o.solid = solid_flag;
+    return Rar5Builder().add_file("c", Bytes{1, 2, 3, 4, 5, 6, 7, 8}, o).build();
+}
+static Status read_status(const Bytes& rar, const Limits& l) {
+    try { auto r = open1(rar, l); read_all(*r); return Status::Ok; }
+    catch (const Error& e) { return e.status(); }
+}
+
+TEST(dictionary_limit_uses_the_declared_dictionary_and_the_declared_total) {
+    Limits l; l.max_dictionary = 1ull << 20;
+    // dictionary log 8 = 32 MiB, 100 MiB declared: the window is 32 MiB, over the 1 MiB limit
+    CHECK(read_status(compressed_file_archive(8, 100ull << 20), l) == Status::LimitExceeded);
+    // dictionary log 0 = 128 KiB: the window never exceeds it, however much data is declared
+    CHECK(read_status(compressed_file_archive(0, 100ull << 20), l) != Status::LimitExceeded);
+    // the limit itself is allowed, one byte under is not
+    Limits exact; exact.max_dictionary = 0x20000;
+    CHECK(read_status(compressed_file_archive(0, 0x20000), exact) != Status::LimitExceeded);
+    Limits under; under.max_dictionary = 0x1FFFF;
+    CHECK(read_status(compressed_file_archive(0, 0x20000), under) == Status::LimitExceeded);
+}
+
+TEST(a_solid_group_is_sized_by_its_largest_dictionary) {
+    FileOpts first; first.method = 3; first.dictionary_log = 8; first.unpacked_override = 100ull << 20;
+    FileOpts second; second.method = 3; second.dictionary_log = 0; second.unpacked_override = 100; second.solid = true;
+    auto rar = Rar5Builder().add_file("a", Bytes{1, 2, 3, 4, 5, 6, 7, 8}, first).add_file("b", Bytes{1, 2, 3, 4, 5, 6, 7, 8}, second).build();
+    Limits l; l.max_dictionary = 1ull << 20;
+    CHECK(read_status(rar, l) == Status::LimitExceeded);
+}
+
+TEST(an_entry_of_unknown_size_reports_its_packed_size) {
+    FileOpts u; u.unknown_size = true; u.unpacked_override = 99;
+    auto rar = Rar5Builder().add_file("u", Bytes{1, 2, 3}, u).build();
+    auto r = open1(rar);
+    EntryFacts f; r->next(f);
+    CHECK(!f.size_known); CHECK_EQ(f.size, 3u);
+}
+
+// ---------------------------------------------------------------- solid groups with real compressed streams
+
+struct SolidSet { Bytes archive; Bytes out1, out2, out3; };
+
+static SolidSet solid_archive(bool stored_in_between = false, bool third_is_solid = true) {
+    SolidSet s;
+    RarModel m;
+    auto f1 = RarBlockBuilder(m).literals(rb(2000, 7)).build();
+    s.out1 = m.file_output();
+    m.start_new_file(true);
+    auto f2 = RarBlockBuilder(m).match(500, 1500).literals("x").build();
+    s.out2 = m.file_output();
+    m.start_new_file(third_is_solid);
+    Bytes f3;
+    if (third_is_solid) f3 = RarBlockBuilder(m).match(700, 1800).literals("y").build();
+    else f3 = RarBlockBuilder(m).literals(rb(10, 5)).match(20, 1800, false).build();      // reaches back before its own start
+    s.out3 = third_is_solid ? m.file_output() : Bytes(30, 0);
+    auto opts = [](const Bytes& out, bool solid) { FileOpts o; o.method = 3; o.solid = solid; o.unpacked_override = out.size(); o.crc_override = crc_of(out); return o; };
+    Rar5Builder b;
+    b.add_file("1", f1, opts(s.out1, false));
+    if (stored_in_between) b.add_file("stored", rb(50, 1));
+    b.add_file("2", f2, opts(s.out2, true));
+    b.add_file("3", f3, opts(s.out3, third_is_solid));
+    s.archive = b.build();
+    return s;
+}
+
+TEST(solid_files_decode_with_their_history_even_when_earlier_files_are_skipped) {
+    auto s = solid_archive();
+    {   MemoryFs fs; run(s.archive, fs);
+        CHECK(fs.file(P("1")) == s.out1); CHECK(fs.file(P("2")) == s.out2); CHECK(fs.file(P("3")) == s.out3); }
+    {   MemoryFs fs; Options o; o.filter = [](const EntryInfo& e) { return e.name == u"3"; };       // files 1 and 2 are only decoded to feed the window
+        run(s.archive, fs, o);
+        CHECK_EQ(fs.final_file_count(), 1u); CHECK(fs.file(P("3")) == s.out3); }
+}
+
+TEST(a_stored_file_in_the_middle_does_not_break_the_solid_chain) {
+    auto s = solid_archive(true);
+    MemoryFs fs; run(s.archive, fs);
+    CHECK(fs.file(P("2")) == s.out2); CHECK(fs.file(P("3")) == s.out3);
+    CHECK_EQ(fs.file(P("stored")).size(), 50u);
+}
+
+TEST(a_non_solid_file_cannot_see_the_files_before_it) {
+    auto s = solid_archive(false, false);                        // file 3 is flagged non-solid but reaches back before its own start
+    MemoryFs fs;
+    CHECK(throws(Status::Corrupt, [&] { run(s.archive, fs); }));
 }
 
 UT_MAIN()

@@ -233,6 +233,9 @@ MUTANTS += RAR5_MUTANTS
 
 # Mutants that cannot change observable behaviour, with the reason. Everything else that survives is a test gap.
 EQUIVALENT = {
+    "NR57": "unreachable since next() refuses a directory that claims data at plan time; the read_data check is defence in depth",
+    "NR62": "only reachable when an earlier file of a group is read after a later one, which the sequential reader cannot do; a failed read resets the decoder anyway",
+    "NR65": "after a failed decode the next read re-decodes the earlier members and the requested file's CRC-32/BLAKE2sp still has to match, so poisoned window state cannot produce accepted wrong data",
     "NG37": "lead bytes F5..F7 would decode to code points >= 0x140000, which the U+10FFFF range check rejects anyway",
     "NE24": "no libarchive reader in our format set returns ARCHIVE_WARN from a data block (CRC errors are FAILED/FATAL); the strict check is kept deliberately",
     "NE26": "libarchive itself refuses data beyond the declared size ('larger than the declared entry size'); our check is defence in depth",

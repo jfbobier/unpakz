@@ -14,6 +14,7 @@ extern "C" {
 
 #include "guard.h"
 #include "platform.h"
+#include "rar5_testing.h"
 
 namespace unpakz::rar5 {
 namespace {
@@ -646,6 +647,7 @@ class Decoder {
 public:
     Decoder(std::uint64_t dictionary, std::uint64_t window_limit, DecoderStats& stats)
         : dictionary_(dictionary), window_limit_(window_limit), bd_(kHuffBc), ld_(kHuffNc), dd_(kHuffDc), ldd_(kHuffLdc), rd_(kHuffRc), stats_(stats) {
+        if (dictionary == 0 || window_limit == 0) throw Error(Status::InvalidArgument, "decoder sizes must be positive");
         const auto initial = std::min<std::uint64_t>(kInitialWindow, window_limit);
         window_.assign(static_cast<std::size_t>(initial), 0);
         mask_ = static_cast<std::size_t>(initial - 1);
@@ -1233,3 +1235,37 @@ std::unique_ptr<Reader> open(std::vector<std::unique_ptr<Volume>> volumes, const
 }
 
 }  // namespace unpakz::rar5
+
+// ---------------------------------------------------------------- test hooks (see rar5_testing.h)
+
+namespace unpakz::rar5::testing {
+
+struct TestDecoder::Impl {
+    Impl(std::uint64_t dictionary, std::uint64_t window) : decoder(dictionary, window, stats) {}
+    DecoderStats stats;
+    Decoder decoder;
+    std::vector<std::unique_ptr<Volume>> volumes;
+    std::vector<Segment> segments;
+};
+
+TestDecoder::TestDecoder(std::uint64_t dictionary, std::uint64_t window_limit) : impl_(std::make_unique<Impl>(dictionary, window_limit)) {}
+TestDecoder::~TestDecoder() = default;
+
+void TestDecoder::decode(const std::vector<std::pair<const std::uint8_t*, std::size_t>>& segments, std::uint64_t unpacked_size, bool solid,
+                         const std::function<void(const std::uint8_t*, std::size_t)>& sink) {
+    impl_->volumes.clear();
+    impl_->segments.clear();
+    for (auto& [p, n] : segments) {
+        impl_->segments.push_back({impl_->volumes.size(), 0, n});
+        impl_->volumes.push_back(memory_volume(p, n));
+    }
+    PackedStream stream(impl_->volumes, impl_->segments);
+    impl_->decoder.decode(stream, unpacked_size, solid, sink);
+}
+
+std::uint64_t dictionary_size(int dictionary_log) { return Decoder::dictionary_size(dictionary_log); }
+void delta(const std::uint8_t* src, std::size_t n, int channels, std::uint8_t* dst) { filters::delta(src, n, channels, dst); }
+void e8(const std::uint8_t* src, std::size_t n, std::int64_t start_rel, bool extended, std::uint8_t* dst) { filters::e8(src, n, start_rel, extended, dst); }
+void arm(const std::uint8_t* src, std::size_t n, std::int64_t start_rel, std::uint8_t* dst) { filters::arm(src, n, start_rel, dst); }
+
+}  // namespace unpakz::rar5::testing
