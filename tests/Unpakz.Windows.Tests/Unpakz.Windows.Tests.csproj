@@ -1,28 +1,36 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <UseWindowsForms>true</UseWindowsForms>
     <IsPackable>false</IsPackable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- System.Memory: Span and BinaryPrimitives for the shared fixture builders on .NET Framework (Microsoft, MIT; tests only) -->
+    <PackageReference Include="System.Memory" Version="4.5.5" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Unpakz.App\Unpakz.App.csproj" />
-    <!-- fixture builders are shared with the main test project -->
-    <Compile Include="..\Unpakz.Tests\Support\ZipBuilder.cs" Link="Support\ZipBuilder.cs" />
-    <Compile Include="..\Unpakz.Tests\Support\Rar5Builder.cs" Link="Support\Rar5Builder.cs" />
-    <Compile Include="..\Unpakz.Tests\Support\TestData.cs" Link="Support\TestData.cs" />
+    <!-- the CLI assembly is named unpakz.exe, which collides with the app's Unpakz.exe on a case-insensitive file system: its logic is not needed here -->
+    <ProjectReference Include="..\..\src\Unpakz.Windows\Unpakz.Windows.csproj" />
+    <ProjectReference Include="..\..\src\Unpakz.Presentation\Unpakz.Presentation.csproj" />
+    <ProjectReference Include="..\..\src\Unpakz.Interop\Unpakz.Interop.csproj" />
+    <!-- fixture builders are shared with the other test project -->
+    <Compile Include="..\Support\*.cs" Link="Support\%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\Unpakz.Tests\Fixtures\**" Link="Fixtures\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\fixtures\**" Link="fixtures\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

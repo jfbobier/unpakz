@@ -1,11 +1,10 @@
 using System;
-using System.Runtime.Versioning;
-using Unpakz.Engine;
+
+using Unpakz.Interop;
 
 namespace Unpakz.Windows;
 
 /// <summary>Registers the running executable as a handler for .zip and .rar (per user, no administrator rights).</summary>
-[SupportedOSPlatform("windows")]
 public static class ShellIntegration
 {
     public static void Register(string exePath, IRegistryWriter? registry = null) =>

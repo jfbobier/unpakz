@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
-using Unpakz.Engine;
+using Unpakz.Interop;
 using ComIDataObject = System.Runtime.InteropServices.ComTypes.IDataObject;
 
 namespace Unpakz.Windows;
@@ -54,7 +54,7 @@ public sealed class VirtualFileDataObject : ComIDataObject, IDisposable
     // ---- IDataObject ----
     public void GetData(ref FORMATETC format, out STGMEDIUM medium)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_disposed) throw new ObjectDisposedException(GetType().Name);
         medium = default;
         CheckAspect(format);
 

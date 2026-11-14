@@ -1,14 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>unpakz</AssemblyName>
     <RootNamespace>Unpakz.Cli</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Unpakz.Engine\Unpakz.Engine.csproj" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <ProjectReference Include="..\Unpakz.Interop\Unpakz.Interop.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="Unpakz.Tests" />
+    <InternalsVisibleTo Include="Unpakz.Windows.Tests" />
   </ItemGroup>
 </Project>

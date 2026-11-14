@@ -1,13 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!-- .NET Framework 4.8 ships with Windows 11: no runtime to install. See docs/decisions/0003. -->
-    <TargetFramework>net48</TargetFramework>
-    <PlatformTarget>x64</PlatformTarget>
+    <!-- netstandard2.0: usable from .NET Framework 4.8 (the shipped front ends, in the box on Windows 11) and from .NET 10 (tests on WSL). See docs/decisions/0003. -->
+    <TargetFramework>netstandard2.0</TargetFramework>
     <RootNamespace>Unpakz.Interop</RootNamespace>
     <AssemblyName>Unpakz.Interop</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Reference assemblies so net48 libraries also build on Linux (build-time only; MIT). -->
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <InternalsVisibleTo Include="Unpakz.Interop.Tests" />
   </ItemGroup>
 </Project>

@@ -1,5 +1,5 @@
 using Microsoft.Win32;
-using Unpakz.Engine;
+using Unpakz.Interop;
 using Unpakz.Windows;
 
 namespace Unpakz.Windows.Tests;

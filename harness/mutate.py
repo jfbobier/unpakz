@@ -7,10 +7,10 @@ in EQUIVALENT with a reason. Source files are always restored (also on Ctrl-C / 
 """
 import atexit, os, signal, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-if os.environ.get("UNPAKZ_MUTATE_MODE") == "native":
+if os.environ.get("UNPAKZ_MUTATE_MODE", "native") == "native":
     from native_mutations import MUTANTS, EQUIVALENT
 else:
-    from mutations import MUTANTS, EQUIVALENT
+    raise SystemExit('the C# mutation catalogue was retired with the C# engine (0.2.0); only UNPAKZ_MUTATE_MODE=native exists')
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 originals = {}
@@ -25,7 +25,7 @@ for sig in (signal.SIGINT, signal.SIGTERM):
     signal.signal(sig, lambda *_: sys.exit(130))
 
 TIMEOUT = 240   # seconds; a mutant that makes the code hang is detected, not stuck forever
-MODE = os.environ.get("UNPAKZ_MUTATE_MODE", "linux")      # "windows": run the Windows test project in the synced Downloads copy
+MODE = os.environ.get("UNPAKZ_MUTATE_MODE", "native")      # "windows": run the Windows test project in the synced Downloads copy
 WIN_FILTER = os.environ.get("UNPAKZ_MUTATE_WIN_FILTER", "FullyQualifiedName~DataObjectTests|FullyQualifiedName~RegistryTests")
 
 

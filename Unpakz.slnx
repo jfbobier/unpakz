@@ -1,11 +1,9 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/Unpakz.Core/Unpakz.Core.csproj" />
-    <Project Path="src/Unpakz.Engine/Unpakz.Engine.csproj" />
+    <Project Path="src/Unpakz.Interop/Unpakz.Interop.csproj" />
     <Project Path="src/Unpakz.Presentation/Unpakz.Presentation.csproj" />
-    <Project Path="src/Unpakz.Cli/Unpakz.Cli.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Unpakz.Tests/Unpakz.Tests.csproj" />
+    <Project Path="tests/Unpakz.Interop.Tests/Unpakz.Interop.Tests.csproj" />
   </Folder>
 </Solution>

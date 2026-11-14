@@ -2,22 +2,35 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Unpakz.Core;
-using Unpakz.Engine;
+using Unpakz.Interop;
 
 namespace Unpakz.Presentation;
 
-public enum ListColumn { Name, Size, Packed, Modified, Type }
+public enum ListColumn { Name, Size, Modified, Type }
 
 /// <summary>One row of the file list. Folders that exist only implicitly (no entry of their own) get a row too, with EntryIndex -1.</summary>
-public sealed record ListRow(string Path, string Name, string Type, bool IsFolder, int EntryIndex, long Size, long Packed, DateTime? Modified);
+public sealed class ListRow
+{
+    public ListRow(string path, string name, string type, bool isFolder, int entryIndex, long size, DateTime? modified)
+    {
+        Path = path; Name = name; Type = type; IsFolder = isFolder; EntryIndex = entryIndex; Size = size; Modified = modified;
+    }
+
+    public string Path { get; }
+    public string Name { get; }
+    public string Type { get; }
+    public bool IsFolder { get; }
+    public int EntryIndex { get; }
+    public long Size { get; }
+    public DateTime? Modified { get; }
+}
 
 /// <summary>Sorted, filtered rows over an archive's entries; maps picked rows back to entries (a picked folder brings its contents).</summary>
 public sealed class FileListViewModel
 {
     private readonly MainViewModel _main;
-    private List<ListRow> _all = [];
-    private List<ListRow> _view = [];
+    private List<ListRow> _all = new();
+    private List<ListRow> _view = new();
     private ListColumn _column = ListColumn.Name;
     private bool _ascending = true;
     private string _filter = string.Empty;
@@ -48,7 +61,7 @@ public sealed class FileListViewModel
     /// <summary>Rebuilds from the archive currently open in the main view-model.</summary>
     public void Reload()
     {
-        _all = _main.Source is null ? [] : BuildRows(_main.Source.Archive.Entries);
+        _all = _main.Source is null ? new List<ListRow>() : BuildRows(_main.Source.Entries);
         Rebuild();
     }
 
@@ -62,8 +75,8 @@ public sealed class FileListViewModel
     /// <summary>Entry indexes behind the picked rows.</summary>
     public HashSet<int> ResolveSelection(IEnumerable<int> rows)
     {
-        ArgumentNullException.ThrowIfNull(rows);
-        var entries = _main.Source?.Archive.Entries ?? [];
+        if (rows is null) throw new ArgumentNullException(nameof(rows));
+        IReadOnlyList<EntryInfo> entries = _main.Source?.Entries ?? (IReadOnlyList<EntryInfo>)Array.Empty<EntryInfo>();
         var picked = new List<int>();
         var folders = new HashSet<string>(StringComparer.Ordinal);
         foreach (var r in rows)
@@ -80,9 +93,9 @@ public sealed class FileListViewModel
         for (var i = 0; i < entries.Count; i++)
         {
             var path = EntrySelection.Normalize(entries[i].Name);
-            for (var slash = path.IndexOf('/', StringComparison.Ordinal); slash >= 0; slash = path.IndexOf('/', slash + 1))
+            for (var slash = path.IndexOf('/'); slash >= 0; slash = path.IndexOf('/', slash + 1))
             {
-                if (!folders.Contains(path[..slash])) continue;
+                if (!folders.Contains(path.Substring(0, slash))) continue;
                 result.Add(i);
                 break;
             }
@@ -93,17 +106,17 @@ public sealed class FileListViewModel
 
     public Task ExtractSelectedAsync(IReadOnlyCollection<int> rows)
     {
-        ArgumentNullException.ThrowIfNull(rows);
-        return _main.ExtractSelectedAsync(rows.Count == 0 ? [] : [.. ResolveSelection(rows)]);
+        if (rows is null) throw new ArgumentNullException(nameof(rows));
+        return _main.ExtractSelectedAsync(rows.Count == 0 ? Array.Empty<int>() : ResolveSelection(rows).ToArray());
     }
 
     public VirtualFileList? PrepareDrag(IReadOnlyCollection<int> rows)
     {
-        ArgumentNullException.ThrowIfNull(rows);
-        return _main.PrepareDrag(rows.Count == 0 ? null : [.. ResolveSelection(rows)]);
+        if (rows is null) throw new ArgumentNullException(nameof(rows));
+        return _main.PrepareDrag(rows.Count == 0 ? null : ResolveSelection(rows).ToArray());
     }
 
-    private static List<ListRow> BuildRows(IReadOnlyList<ArchiveEntry> entries)
+    private static List<ListRow> BuildRows(IReadOnlyList<EntryInfo> entries)
     {
         var rows = new List<ListRow>(entries.Count);
         var explicitFolders = new HashSet<string>(StringComparer.Ordinal);
@@ -116,13 +129,13 @@ public sealed class FileListViewModel
             var path = EntrySelection.Normalize(e.Name);
             if (path.Length == 0) continue;
             var isFolder = e.Kind == EntryKind.Directory;
-            rows.Add(new ListRow(path, path[(path.LastIndexOf('/') + 1)..], TypeOf(e.Kind), isFolder, e.Index, isFolder ? 0 : (long)Math.Min(e.UncompressedSize, long.MaxValue), (long)Math.Min(e.CompressedSize, long.MaxValue), e.LastWriteLocal));
+            rows.Add(new ListRow(path, path.Substring(path.LastIndexOf('/') + 1), TypeOf(e.Kind), isFolder, (int)e.Index, isFolder ? 0 : (long)Math.Min(e.Size, long.MaxValue), e.LastWriteUtc?.ToLocalTime()));
 
-            for (var slash = path.IndexOf('/', StringComparison.Ordinal); slash >= 0; slash = path.IndexOf('/', slash + 1))
+            for (var slash = path.IndexOf('/'); slash >= 0; slash = path.IndexOf('/', slash + 1))
             {
-                var folder = path[..slash];
+                var folder = path.Substring(0, slash);
                 if (!explicitFolders.Contains(folder) && implied.Add(folder))
-                    rows.Add(new ListRow(folder, folder[(folder.LastIndexOf('/') + 1)..], "Folder", true, -1, 0, 0, null));
+                    rows.Add(new ListRow(folder, folder.Substring(folder.LastIndexOf('/') + 1), "Folder", true, -1, 0, null));
             }
         }
 
@@ -140,13 +153,12 @@ public sealed class FileListViewModel
     private void Rebuild()
     {
         IEnumerable<ListRow> rows = _all;
-        if (_filter.Length > 0) rows = rows.Where(r => r.Path.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+        if (_filter.Length > 0) rows = rows.Where(r => r.Path.IndexOf(_filter, StringComparison.OrdinalIgnoreCase) >= 0);
 
         Comparison<ListRow> byPath = (a, b) => string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase);
         Comparison<ListRow> compare = _column switch
         {
             ListColumn.Size => (a, b) => a.Size.CompareTo(b.Size),
-            ListColumn.Packed => (a, b) => a.Packed.CompareTo(b.Packed),
             ListColumn.Modified => (a, b) => Nullable.Compare(a.Modified, b.Modified),
             ListColumn.Type => (a, b) => string.Compare(a.Type, b.Type, StringComparison.Ordinal),
             _ => byPath,

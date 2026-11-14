@@ -3,7 +3,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
-using Unpakz.Engine;
+using Unpakz.Interop;
 using Unpakz.Presentation;
 using Unpakz.Windows;
 
@@ -45,6 +45,7 @@ internal sealed class MainForm : Form
         ClientSize = new Size(560, 460);
         StartPosition = FormStartPosition.CenterScreen;
         AllowDrop = true;
+        Font = SystemFonts.MessageBoxFont ?? Font;      // Segoe UI 9 on Windows 11 (net48 would otherwise default to MS Sans Serif)
         AutoScaleMode = AutoScaleMode.Dpi;
         KeyPreview = true;
 
@@ -163,7 +164,7 @@ internal sealed class MainForm : Form
     {
         try
         {
-            ShellIntegration.Register(Environment.ProcessPath!);
+            ShellIntegration.Register(Application.ExecutablePath);
             MessageBox.Show("Done. Open Settings > Default apps and choose Unpakz for .zip and/or .rar if you want it to open them by double-click.", "Unpakz", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
@@ -184,14 +185,14 @@ internal sealed class MainForm : Form
         DoDragDrop(data, DragDropEffects.Copy);
     }
 
-    private static string Shorten(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "…";
+    private static string Shorten(string text, int max) => text.Length <= max ? text : text.Substring(0, max - 1) + "…";
 
     private void Render()
     {
         var open = _model.IsOpen;
         var idle = open && !_model.IsBusy;
         _title.Text = open ? Path.GetFileName(_model.ArchivePath) : "No archive open";
-        _subtitle.Text = open ? _model.Details : "Drop a .zip or .rar file here, or use Open.";
+        _subtitle.Text = open ? _model.Details : "Drop a .zip, .rar or .tar.gz file here, or use Open.";
         _extractTo.Enabled = idle;
         _extractHere.Enabled = idle;
         _showFiles.Enabled = open;
@@ -202,7 +203,7 @@ internal sealed class MainForm : Form
         _tips.SetToolTip(_title, open ? _model.ArchivePath ?? string.Empty : string.Empty);
         _dragTile.Enabled = idle;
         _dragLabel.ForeColor = idle ? SystemColors.ControlText : SystemColors.GrayText;
-        _progress.Value = (int)Math.Clamp(_model.Progress * 1000, 0, 1000);
+        _progress.Value = (int)Math.Max(0, Math.Min(1000, _model.Progress * 1000));
         _progress.Visible = _model.IsBusy || _model.Progress > 0;
         _status.Text = _model.Status;
         _status.ForeColor = _model.LastStatus == RunStatus.Failed ? Color.Firebrick : SystemColors.ControlText;

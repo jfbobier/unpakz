@@ -8,7 +8,7 @@ import argparse, hashlib, os, random, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAR = os.path.join(ROOT, "tools", "rar", "rar")
-FIXTURES = os.path.join(ROOT, "tests", "Unpakz.Tests", "Fixtures")
+FIXTURES = os.path.join(ROOT, "tests", "fixtures")
 
 # Differences that are decisions, not bugs. Anything else that fails is a failure of the run.
 KNOWN = {

@@ -11,12 +11,13 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        ApplicationConfiguration.Initialize();
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
 
         if (args.Contains("--register", StringComparer.OrdinalIgnoreCase))
         {
-            ShellIntegration.Register(Environment.ProcessPath!);
-            MessageBox.Show("Unpakz now appears in \"Open with\" and in Settings > Default apps for .zip and .rar.", "Unpakz", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ShellIntegration.Register(Application.ExecutablePath);
+            MessageBox.Show("Unpakz now appears in \"Open with\" and in Settings > Default apps for .zip, .rar and .tgz.", "Unpakz", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 0;
         }
 
@@ -27,11 +28,13 @@ internal static class Program
             return 0;
         }
 
-        using var model = new MainViewModel(new FormsFolderPicker(), new FormsPrompt());
-        using var form = new MainForm(model);
-        var path = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
-        if (path is not null) form.OpenArchive(path);
-        Application.Run(form);
-        return 0;
+        using (var model = new MainViewModel(new FormsFolderPicker(), new FormsPrompt()))
+        using (var form = new MainForm(model))
+        {
+            var path = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
+            if (path is not null) form.OpenArchive(path);
+            Application.Run(form);
+            return 0;
+        }
     }
 }

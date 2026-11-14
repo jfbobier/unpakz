@@ -1,14 +1,17 @@
 using System;
-using System.Runtime.Versioning;
+
 using Microsoft.Win32;
-using Unpakz.Engine;
+using Unpakz.Interop;
 
 namespace Unpakz.Windows;
 
 /// <summary>HKEY_CURRENT_USER implementation of <see cref="IRegistryWriter"/>. An optional prefix puts everything under a scratch key (used by tests).</summary>
-[SupportedOSPlatform("windows")]
-public sealed class RegistryWriter(string prefix = "") : IRegistryWriter
+public sealed class RegistryWriter : IRegistryWriter
 {
+    private readonly string prefix;
+
+    public RegistryWriter(string prefix = "") => this.prefix = prefix ?? string.Empty;
+
     private string Full(string key) => prefix.Length == 0 ? key : prefix.TrimEnd('\\') + "\\" + key;
 
     public void SetValue(string key, string? name, string value)

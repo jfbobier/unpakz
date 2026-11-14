@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using STATSTG = System.Runtime.InteropServices.ComTypes.STATSTG;
 
 namespace Unpakz.Windows;
 
@@ -44,7 +45,7 @@ internal sealed class StreamAdapter : IStream, IDisposable
 
     public void Read(byte[] pv, int cb, IntPtr pcbRead)
     {
-        ArgumentNullException.ThrowIfNull(pv);
+        if (pv is null) throw new ArgumentNullException(nameof(pv));
         var total = 0;
         try
         {
@@ -93,7 +94,7 @@ internal sealed class StreamAdapter : IStream, IDisposable
 
     public void CopyTo(IStream pstm, long cb, IntPtr pcbRead, IntPtr pcbWritten)
     {
-        ArgumentNullException.ThrowIfNull(pstm);
+        if (pstm is null) throw new ArgumentNullException(nameof(pstm));
         var buffer = new byte[65_536];
         long copied = 0;
         while (copied < cb)

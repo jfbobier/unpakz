@@ -1,7 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <InternalsVisibleTo Include="Unpakz.Tests" />
-    <InternalsVisibleTo Include="Unpakz.Engine" />
-    <InternalsVisibleTo Include="Unpakz.Bench" />
-  </ItemGroup>
-</Project>

@@ -17,7 +17,7 @@ internal sealed class FileListForm : Form
     private readonly MainViewModel _main;
     private readonly FileListViewModel _model;
     private readonly ListView _list = new() { Dock = DockStyle.Fill, View = View.Details, VirtualMode = true, FullRowSelect = true, MultiSelect = true, HideSelection = false, AllowColumnReorder = false };
-    private readonly TextBox _filter = new() { Dock = DockStyle.Fill, PlaceholderText = "Search files…" };
+    private readonly TextBox _filter = new() { Dock = DockStyle.Fill };
     private readonly Button _extract = new() { Text = "Extract selected to…", AutoSize = true, Padding = new Padding(10, 4, 10, 4) };
     private readonly Label _count = new() { AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = SystemColors.GrayText };
     private ListColumn _sortColumn = ListColumn.Name;
@@ -32,12 +32,12 @@ internal sealed class FileListForm : Form
         MinimumSize = new Size(560, 360);
         ClientSize = new Size(760, 520);
         StartPosition = FormStartPosition.CenterParent;
+        Font = SystemFonts.MessageBoxFont ?? Font;      // Segoe UI 9 on Windows 11 (net48 would otherwise default to MS Sans Serif)
         AutoScaleMode = AutoScaleMode.Dpi;
         KeyPreview = true;
 
         _list.Columns.Add("Name", 320);
         _list.Columns.Add("Size", 90, HorizontalAlignment.Right);
-        _list.Columns.Add("Packed", 90, HorizontalAlignment.Right);
         _list.Columns.Add("Modified", 130);
         _list.Columns.Add("Type", 70);
         _list.RetrieveVirtualItem += OnRetrieve;
@@ -89,7 +89,6 @@ internal sealed class FileListForm : Form
         var row = _model.GetRow(e.ItemIndex);
         var item = new ListViewItem(row.Path);
         item.SubItems.Add(row.IsFolder ? string.Empty : MainViewModel.FormatSize(row.Size));
-        item.SubItems.Add(row.IsFolder ? string.Empty : MainViewModel.FormatSize(row.Packed));
         item.SubItems.Add(row.Modified?.ToString("g", inv) ?? string.Empty);
         item.SubItems.Add(row.Type);
         e.Item = item;

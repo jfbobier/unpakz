@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- CliApp.cs is shared source that targets net48; these rules differ between target frameworks -->
+    <NoWarn>$(NoWarn);CA1865;CA1510;CA1861;CA1825</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Unpakz.Interop\Unpakz.Interop.csproj" />
+    <ProjectReference Include="..\..\src\Unpakz.Presentation\Unpakz.Presentation.csproj" />
+    <!-- the CLI is net48 (cannot be referenced from net10); its logic is compiled into the tests directly -->
+    <Compile Include="..\..\src\Unpakz.Cli\CliApp.cs" Link="Cli\CliApp.cs" />
+    <Compile Include="..\Support\*.cs" Link="Support\%(Filename)%(Extension)" />
+    <None Include="..\fixtures\**" Link="fixtures\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

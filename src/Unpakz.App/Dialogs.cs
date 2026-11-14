@@ -8,14 +8,8 @@ internal sealed class FormsFolderPicker : IFolderPicker
 {
     public string? Pick(string title, string? startFolder)
     {
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = title,
-            UseDescriptionForTitle = true,
-            ShowNewFolderButton = true,
-            InitialDirectory = startFolder ?? string.Empty,
-        };
-        return dialog.ShowDialog(Form.ActiveForm) == DialogResult.OK ? dialog.SelectedPath : null;
+        using (var dialog = new FolderBrowserDialog { Description = title, ShowNewFolderButton = true, SelectedPath = startFolder ?? string.Empty })
+            return dialog.ShowDialog(Form.ActiveForm) == DialogResult.OK ? dialog.SelectedPath : null;
     }
 }
 

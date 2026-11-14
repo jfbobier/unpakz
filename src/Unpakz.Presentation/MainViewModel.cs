@@ -5,8 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Unpakz.Core;
-using Unpakz.Engine;
+using Unpakz.Interop;
 
 namespace Unpakz.Presentation;
 
@@ -18,19 +17,17 @@ public sealed class MainViewModel : IDisposable
 {
     private readonly IFolderPicker _picker;
     private readonly IPrompt _prompt;
-    private readonly Func<string, ArchiveSource> _opener;
-    private readonly IFileSystem? _fileSystem;
+    private readonly Func<string, ArchiveSession> _opener;
     private CancellationTokenSource? _cts;
-    private string _status = "Open or drop a .zip or .rar file.";
+    private string _status = "Open or drop a .zip, .rar or .tar.gz file.";
     private double _progress;
     private bool _busy;
 
-    public MainViewModel(IFolderPicker picker, IPrompt prompt, Func<string, ArchiveSource>? opener = null, IFileSystem? fileSystem = null)
+    public MainViewModel(IFolderPicker picker, IPrompt prompt, Func<string, ArchiveSession>? opener = null)
     {
-        _fileSystem = fileSystem;
         _picker = picker ?? throw new ArgumentNullException(nameof(picker));
         _prompt = prompt ?? throw new ArgumentNullException(nameof(prompt));
-        _opener = opener ?? (path => ArchiveSource.Open(path));
+        _opener = opener ?? ArchiveSession.Open;
     }
 
     /// <summary>Raised with the property name after a property changes. May be raised from a worker thread: views must marshal.</summary>
@@ -38,7 +35,7 @@ public sealed class MainViewModel : IDisposable
 
     public string? ArchivePath { get; private set; }
 
-    public ArchiveSource? Source { get; private set; }
+    public ArchiveSession? Source { get; private set; }
 
     public bool IsOpen => Source is not null;
 
@@ -84,7 +81,7 @@ public sealed class MainViewModel : IDisposable
             Changed?.Invoke(nameof(IsOpen));
             return true;
         }
-        catch (Exception ex) when (ex is ArchiveException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is UnpakzException or IOException or UnauthorizedAccessException)
         {
             Status = FriendlyErrors.Describe(ex);
             Changed?.Invoke(nameof(IsOpen));
@@ -92,19 +89,18 @@ public sealed class MainViewModel : IDisposable
         }
     }
 
-    private static string Describe(ArchiveSource source)
+    private static string Describe(ArchiveSession source)
     {
         var inv = CultureInfo.InvariantCulture;
-        var files = source.Archive.Entries.Count(e => e.Kind == EntryKind.File);
-        var size = source.VolumePaths.Sum(p => new FileInfo(p).Length);
-        var text = string.Create(inv, $"{source.Archive.Format.ToUpperInvariant()} · {files} files · {FormatSize(size)}");
-        if (source.VolumePaths.Count > 1) text += string.Create(inv, $" · {source.VolumePaths.Count} parts");
+        var files = source.Entries.Count(e => e.Kind == EntryKind.File);
+        var text = source.Format + " · " + files.ToString(inv) + " files · " + FormatSize(source.TotalBytes);
+        if (source.VolumePaths.Count > 1) text += " · " + source.VolumePaths.Count.ToString(inv) + " parts";
         return text;
     }
 
     public static string FormatSize(long bytes)
     {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        string[] units = { "B", "KB", "MB", "GB", "TB" };
         double v = bytes;
         var u = 0;
         while (v >= 1024 && u < units.Length - 1) { v /= 1024; u++; }
@@ -116,7 +112,7 @@ public sealed class MainViewModel : IDisposable
 
     public Task ExtractSelectedAsync(IReadOnlyCollection<int> entryIndexes)
     {
-        ArgumentNullException.ThrowIfNull(entryIndexes);
+        if (entryIndexes is null) throw new ArgumentNullException(nameof(entryIndexes));
         if (entryIndexes.Count == 0)
         {
             Status = "Select one or more files first.";
@@ -134,7 +130,7 @@ public sealed class MainViewModel : IDisposable
     {
         if (!IsOpen || IsBusy) return;
         var destination = _picker.Pick(title, DestinationNaming.DirectoryOf(RequirePath()));
-        if (string.IsNullOrWhiteSpace(destination)) return;
+        if (destination is null || string.IsNullOrWhiteSpace(destination)) return;
         await RunAsync(destination, selection).ConfigureAwait(false);
     }
 
@@ -151,13 +147,13 @@ public sealed class MainViewModel : IDisposable
         try
         {
             var progress = new ImmediateProgress<ExtractionProgress>(p => Progress = p.TotalBytes > 0 ? Math.Min(1.0, (double)p.BytesWritten / p.TotalBytes) : 0);
-            var outcome = await ExtractionRunner.RunAsync(Source!.Archive, destination, selection, null, progress, _fileSystem, _cts.Token).ConfigureAwait(false);
+            var outcome = await ExtractionRunner.RunAsync(Source!, destination, selection, OverwritePolicy.Fail, progress, _cts.Token).ConfigureAwait(false);
 
-            if (outcome.Status == RunStatus.Failed && outcome.Error == ArchiveError.Conflict
-                && Ask(context, $"Some files already exist in {destination}. Replace them?"))
+            if (outcome.Status == RunStatus.Failed && outcome.Error == UnpakzStatus.Conflict
+                && Ask(context, "Some files already exist in " + destination + ". Replace them?"))
             {
                 Progress = 0;
-                outcome = await ExtractionRunner.RunAsync(Source.Archive, destination, selection, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite }, progress, _fileSystem, _cts.Token).ConfigureAwait(false);
+                outcome = await ExtractionRunner.RunAsync(Source!, destination, selection, OverwritePolicy.Replace, progress, _cts.Token).ConfigureAwait(false);
             }
 
             if (outcome.Status == RunStatus.Success) Progress = 1;
@@ -189,9 +185,9 @@ public sealed class MainViewModel : IDisposable
         if (!IsOpen) return null;
         try
         {
-            return VirtualFileList.Build(Source!.Archive, entryIndexes);
+            return VirtualFileList.Build(Source!, entryIndexes);
         }
-        catch (ArchiveException ex)
+        catch (UnpakzException ex)
         {
             Status = FriendlyErrors.Describe(ex);
             return null;
@@ -201,14 +197,13 @@ public sealed class MainViewModel : IDisposable
     /// <summary>A forward-only stream with the decoded bytes of one dragged file. Nothing is written to disk.</summary>
     public Stream OpenDragStream(VirtualFile file)
     {
-        ArgumentNullException.ThrowIfNull(file);
-        var archive = Source?.Archive ?? throw new InvalidOperationException("No archive is open.");
-        return EntryStream.Open(archive, archive.Entries[file.EntryIndex]);
+        if (file is null) throw new ArgumentNullException(nameof(file));
+        var session = Source ?? throw new InvalidOperationException("No archive is open.");
+        return EntryStream.Open(session, session.Entries[file.EntryIndex]);
     }
 
     private void Close()
     {
-        Source?.Dispose();
         Source = null;
         ArchivePath = null;
         Summary = string.Empty;
@@ -222,8 +217,12 @@ public sealed class MainViewModel : IDisposable
         Changed?.Invoke(nameof(IsOpen));
     }
 
-    private sealed class ImmediateProgress<T>(Action<T> report) : IProgress<T>
+    private sealed class ImmediateProgress<T> : IProgress<T>
     {
-        public void Report(T value) => report(value);
+        private readonly Action<T> _report;
+
+        public ImmediateProgress(Action<T> report) => _report = report;
+
+        public void Report(T value) => _report(value);
     }
 }

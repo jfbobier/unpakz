@@ -71,7 +71,7 @@ foreach(t api_test volumes_test rar5_test rar5_container_test rar5_decoder_test)
   target_link_libraries(${t} PRIVATE unpakz_core)
   add_test(NAME ${t} COMMAND ${t})
 endforeach()
-target_compile_definitions(rar5_test PRIVATE UNPAKZ_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/../tests/Unpakz.Tests/Fixtures")
+target_compile_definitions(rar5_test PRIVATE UNPAKZ_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/../tests/fixtures")
 
 # The shipped library: C API only, static CRT so users need no redistributable.
 add_library(unpakz SHARED ${UNPAKZ_SOURCES})

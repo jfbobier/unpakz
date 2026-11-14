@@ -1,8 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Unpakz.Engine\Unpakz.Engine.csproj" />
+    <ProjectReference Include="..\Unpakz.Interop\Unpakz.Interop.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="Unpakz.Tests" />
+    <InternalsVisibleTo Include="Unpakz.Interop.Tests" />
   </ItemGroup>
 </Project>

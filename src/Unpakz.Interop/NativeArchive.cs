@@ -151,15 +151,57 @@ public static class NativeArchive
         return new ExtractResult { Files = result.Files, Directories = result.Directories, Bytes = result.Bytes, Skipped = result.Skipped };
     }
 
+    /// <summary>
+    /// Streams the decoded bytes of one entry to <paramref name="sink"/> (return false to stop) without writing anything to disk. The checksum is
+    /// verified after the last byte, so a <see cref="UnpakzStatus.Corrupt"/> failure can arrive after bytes were delivered.
+    /// </summary>
+    public static void ReadEntry(string path, long entryIndex, Func<byte[], int, bool> sink)
+    {
+        if (path is null) throw new ArgumentNullException(nameof(path));
+        if (sink is null) throw new ArgumentNullException(nameof(sink));
+        if (entryIndex < 0) throw new ArgumentOutOfRangeException(nameof(entryIndex));
+        AbiVersion();
+
+        var buffer = new byte[1 << 20];
+        Exception? failure = null;
+        NativeMethods.DataCallback callback = (data, size, user) =>
+        {
+            try
+            {
+                ulong done = 0;
+                while (done < size)
+                {
+                    var n = (int)Math.Min((ulong)buffer.Length, size - done);
+                    System.Runtime.InteropServices.Marshal.Copy(new IntPtr(data.ToInt64() + (long)done), buffer, 0, n);
+                    if (!sink(buffer, n)) return 0;
+                    done += (ulong)n;
+                }
+
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+                return 0;
+            }
+        };
+
+        var error = NewError();
+        var status = NativeMethods.unpakz_read_entry(path, (ulong)entryIndex, IntPtr.Zero, callback, IntPtr.Zero, ref error);
+        GC.KeepAlive(callback);
+        if (failure is not null) throw new InvalidOperationException("The receiver of the entry data failed.", failure);
+        Throw(status, error);
+    }
+
     /// <summary>The native path guard, for front ends that show or forward names. Returns false (and the reason) for a refused name.</summary>
     public static bool TryCheckName(string name, out string relativePath, out string reason)
     {
-        var sb = new StringBuilder(Math.Max(64, name.Length + 8));
+        var buffer = new char[Math.Max(64, name.Length + 8)];
         var error = NewError();
-        var status = NativeMethods.unpakz_check_name(name, sb, (uint)sb.Capacity, ref error);
+        var status = NativeMethods.unpakz_check_name(name, buffer, (uint)buffer.Length, ref error);
         if (status == 0)
         {
-            relativePath = sb.ToString();
+            relativePath = new string(buffer, 0, Array.IndexOf(buffer, '\0'));
             reason = string.Empty;
             return true;
         }

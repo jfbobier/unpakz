@@ -3,7 +3,7 @@ using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Windows.Forms;
-using Unpakz.Engine;
+using Unpakz.Interop;
 using Unpakz.Presentation;
 using Unpakz.Tests.Support;
 
@@ -32,19 +32,19 @@ internal static class Sta
 
     public static void Pump(Func<bool> until, int timeoutMs = 30_000)
     {
-        var start = Environment.TickCount64;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         while (!until())
         {
             Application.DoEvents();
             Thread.Sleep(5);
-            if (Environment.TickCount64 - start > timeoutMs) throw new TimeoutException("The UI did not reach the expected state in time.");
+            if (clock.ElapsedMilliseconds > timeoutMs) throw new TimeoutException("The UI did not reach the expected state in time.");
         }
     }
 
     public static void Settle(int ms = 60)
     {
-        var end = Environment.TickCount64 + ms;
-        while (Environment.TickCount64 < end) { Application.DoEvents(); Thread.Sleep(5); }
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (clock.ElapsedMilliseconds < ms) { Application.DoEvents(); Thread.Sleep(5); }
     }
 }
 
@@ -125,92 +125,80 @@ internal static class Ui
     private static string Describe(Control c) => string.IsNullOrEmpty(c.Name) ? c.GetType().Name : c.Name;
 }
 
-/// <summary>Archives of every supported flavour, each with the tree it must extract to.</summary>
-internal static class Archives
+/// <summary>Archives of every supported flavour, built by independent writers, each with the tree it must extract to.</summary>
+internal static class Samples
 {
-    public sealed record Case(string Name, Func<string, string> Create, Dictionary<string, byte[]> Tree);
-
-    private static Dictionary<string, byte[]> Tree() => new()
+    public static readonly Dictionary<string, byte[]> Tree = new()
     {
-        ["readme.txt"] = TestData.Text(3000, 1),
-        ["docs/guide.txt"] = TestData.Text(9000, 2),
-        ["docs/deep/notes.txt"] = TestData.Text(2000, 3),
-        ["data/blob.bin"] = TestData.Random(20_000, 4),
+        ["readme.txt"] = Unpakz.Tests.Support.TestData.Text(3000, 1),
+        ["docs/guide.txt"] = Unpakz.Tests.Support.TestData.Text(9000, 2),
+        ["docs/deep/notes.txt"] = Unpakz.Tests.Support.TestData.Text(2000, 3),
+        ["data/blob.bin"] = Unpakz.Tests.Support.TestData.Random(20_000, 4),
         ["empty.txt"] = [],
     };
 
-    private static Dictionary<string, byte[]> FixtureTree() => new()
+    public static string Dir() { var d = Path.Combine(Path.GetTempPath(), "unpakz-ui-" + Guid.NewGuid().ToString("N").Substring(0, 8)); Directory.CreateDirectory(d); return d; }
+
+    public static string Zip(string dir, Dictionary<string, byte[]>? tree = null)
     {
-        ["text.txt"] = TestData.Text(8000), ["table.bin"] = TestData.Table(4000), ["tiny.txt"] = "hello"u8.ToArray(),
-        ["empty.txt"] = [], ["sub/z.txt"] = TestData.Text(3000, 9),
-    };
+        var b = new Unpakz.Tests.Support.ZipBuilder();
+        foreach (var (k, v) in tree ?? Tree) b.Add(k, v, deflate: v.Length > 100);
+        var p = Path.Combine(dir, "sample.zip");
+        File.WriteAllBytes(p, b.Build());
+        return p;
+    }
 
-    private static string Fixture(params string[] parts) => Path.Combine([AppContext.BaseDirectory, "Fixtures", .. parts]);
-
-    public static readonly Case[] All =
-    [
-        new("zip", d => { var b = new ZipBuilder(); foreach (var (k, v) in Tree()) b.Add(k, v, deflate: v.Length > 100); var p = Path.Combine(d, "sample.zip"); File.WriteAllBytes(p, b.Build()); return p; }, Tree()),
-        new("rar5-stored", d => { var b = new Rar5Builder(); foreach (var (k, v) in Tree()) b.AddFile(k, v); var p = Path.Combine(d, "sample.rar"); File.WriteAllBytes(p, b.Build()); return p; }, Tree()),
-        new("rar5-multivolume", d => { var b = new Rar5Builder(); foreach (var (k, v) in Tree()) b.AddFile(k, v); var vols = b.BuildVolumes(5000); for (var i = 0; i < vols.Count; i++) File.WriteAllBytes(Path.Combine(d, $"sample.part{i + 1:D2}.rar"), vols[i]); return Path.Combine(d, "sample.part01.rar"); }, Tree()),
-        new("rar5-compressed", d => { var p = Path.Combine(d, "mix.rar"); File.Copy(Fixture("rar5-m3-mix.rar"), p); return p; }, FixtureTree()),
-        new("rar5-solid", d => { var p = Path.Combine(d, "solid.rar"); File.Copy(Fixture("rar5-m5-solid.rar"), p); return p; }, FixtureTree()),
-        new("rar5-real-volumes", d => { foreach (var f in Directory.GetFiles(Fixture("mv-m3"), "*.rar")) File.Copy(f, Path.Combine(d, Path.GetFileName(f))); return Directory.GetFiles(d, "*part01.rar").Single(); },
-            new() { ["a.txt"] = TestData.Text(9000, 3), ["t.bin"] = TestData.Table(3000), ["c.txt"] = TestData.Text(700, 4) }),
-    ];
-
-    public static TheoryData<string> Names() => [.. All.Select(c => c.Name)];
-
-    public static Case Get(string name) => All.Single(c => c.Name == name);
-
-    public static Dictionary<string, string> Snapshot(string root) =>
-        !Directory.Exists(root) ? [] : Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(
-            f => Path.GetRelativePath(root, f).Replace('\\', '/'), f => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(f))), StringComparer.Ordinal);
-
-    public static Dictionary<string, string> Expected(Dictionary<string, byte[]> tree, Func<string, bool>? keep = null) =>
-        tree.Where(kv => keep?.Invoke(kv.Key) ?? true).ToDictionary(kv => kv.Key, kv => Convert.ToHexString(SHA256.HashData(kv.Value)), StringComparer.Ordinal);
-}
-
-internal sealed class FixedPicker(string? answer) : IFolderPicker
-{
-    public int Calls { get; private set; }
-    public string? Pick(string title, string? startFolder) { Calls++; return answer; }
-}
-
-internal sealed class FixedPrompt(bool answer) : IPrompt
-{
-    public bool ConfirmReplace(string message) => answer;
-}
-
-/// <summary>Lets the first write through, then holds every later write until released: freezes an extraction mid-way.</summary>
-internal sealed class GatedFileSystem(IFileSystem inner) : IFileSystem
-{
-    private int _writes;
-
-    public ManualResetEventSlim Gate { get; } = new(false);
-
-    public PathKind GetKind(string path) => inner.GetKind(path);
-
-    public void CreateDirectory(string path) => inner.CreateDirectory(path);
-
-    public IFileWriter CreateFile(string finalPath, long preallocate) => new W(inner.CreateFile(finalPath, preallocate), this);
-
-    private sealed class W(IFileWriter w, GatedFileSystem owner) : IFileWriter
+    public static string Rar(string dir)
     {
-        // the very first write of the whole extraction goes through (so progress becomes non-zero); every later one waits for the gate
-        public void Write(ReadOnlySpan<byte> data)
-        {
-            if (Interlocked.Increment(ref owner._writes) > 1) owner.Gate.Wait();
-            w.Write(data);
-        }
+        var b = new Unpakz.Tests.Support.Rar5Builder();
+        foreach (var (k, v) in Tree) b.AddFile(k, v);
+        var p = Path.Combine(dir, "sample.rar");
+        File.WriteAllBytes(p, b.Build());
+        return p;
+    }
 
-        public void Commit(DateTime? t, bool o) => w.Commit(t, o);
+    public static string RealRar(string dir)
+    {
+        var p = Path.Combine(dir, "real.rar");
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "fixtures", "rar5-m3-mix.rar"), p);
+        return p;
+    }
 
-        public void Dispose() => w.Dispose();
+    public static string MultiVolume(string dir)
+    {
+        var b = new Unpakz.Tests.Support.Rar5Builder();
+        foreach (var (k, v) in Tree) b.AddFile(k, v);
+        var vols = b.BuildVolumes(5000);
+        for (var i = 0; i < vols.Count; i++) File.WriteAllBytes(Path.Combine(dir, $"sample.part{i + 1:D2}.rar"), vols[i]);
+        return Path.Combine(dir, "sample.part01.rar");
+    }
+
+    public static string Broken(string dir)
+    {
+        var p = Path.Combine(dir, "broken.zip");
+        File.WriteAllBytes(p, Unpakz.Tests.Support.TestData.Random(3000, 9));
+        return p;
+    }
+
+    public static string Hostile(string dir)
+    {
+        var p = Path.Combine(dir, "evil.zip");
+        File.WriteAllBytes(p, new Unpakz.Tests.Support.ZipBuilder().Add("ok", [1]).Add("../escape", [2]).Build());
+        return p;
     }
 }
 
-internal static class FormReflection
+internal sealed class FakePicker : IFolderPicker
 {
-    public static void Raise(Control c, string method, EventArgs args) =>
-        typeof(Control).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(c, [args]);
+    private readonly string? _answer;
+    public FakePicker(string? answer) => _answer = answer;
+    public string? Pick(string title, string? startFolder) => _answer;
+}
+
+internal sealed class FakePrompt : IPrompt
+{
+    private readonly bool _answer;
+    public int Asked;
+    public FakePrompt(bool answer) => _answer = answer;
+    public bool ConfirmReplace(string message) { Asked++; return _answer; }
 }

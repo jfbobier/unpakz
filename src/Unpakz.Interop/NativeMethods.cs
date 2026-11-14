@@ -18,6 +18,9 @@ internal static class NativeMethods
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate int CancelCallback(IntPtr user);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate int DataCallback(IntPtr data, ulong size, IntPtr user);
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     internal struct NativeError
     {
@@ -104,8 +107,11 @@ internal static class NativeMethods
     internal static extern int unpakz_list(string path, ref NativeLimits limits, EntryCallback callback, IntPtr user, ref NativeError error);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    internal static extern int unpakz_read_entry(string path, ulong entryIndex, IntPtr limits, DataCallback callback, IntPtr user, ref NativeError error);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
     internal static extern int unpakz_extract(string path, string destination, ref NativeExtractOptions options, ref NativeResult result, ref NativeError error);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
-    internal static extern int unpakz_check_name([MarshalAs(UnmanagedType.LPWStr)] string name, [Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder output, uint outputChars, ref NativeError error);
+    internal static extern int unpakz_check_name([MarshalAs(UnmanagedType.LPWStr)] string name, [Out] char[] output, uint outputChars, ref NativeError error);
 }
