@@ -157,7 +157,7 @@ public sealed class FileListViewModel
         {
             var c = compare(a, b);
             if (c == 0) c = byPath(a, b);
-            return _ascending || compare == byPath && false ? c : -c;
+            return _ascending ? c : -c;
         });
         _view = sorted;
     }

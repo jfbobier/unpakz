@@ -126,6 +126,8 @@ public sealed class UiTests : IDisposable
             foreach (var n in ExtractButtons) Assert.False(Ui.Find<Button>(form, n).Enabled, n);
             Assert.True(Ui.Find<Button>(form, "Open").Enabled);
             Assert.True(form.AllowDrop);
+            Assert.False(Ui.Find<ProgressBar>(form, "Progress").Visible);           // nothing is running
+            Assert.False(Ui.Find<Button>(form, "Cancel").Visible);
         });
     }
 
@@ -143,6 +145,8 @@ public sealed class UiTests : IDisposable
             Ui.Place(form, 1.0, Sizes[1]);
             form.OpenArchive(NewSource(c));
             Assert.Contains(Path.GetFileName(vm.ArchivePath!), Ui.Find<Label>(form, "Title").Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(Path.GetFileName(vm.ArchivePath!), Ui.Find<Label>(form, "Subtitle").Text, StringComparison.Ordinal);   // the name is shown once
+            Assert.Contains(vm.Source!.Archive.Format.ToUpperInvariant(), Ui.Find<Label>(form, "Subtitle").Text, StringComparison.Ordinal);
 
             Ui.Find<Button>(form, "ExtractTo").PerformClick();
             Sta.Pump(() => vm.LastStatus is not null && !vm.IsBusy);

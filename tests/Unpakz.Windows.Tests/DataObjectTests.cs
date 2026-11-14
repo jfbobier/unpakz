@@ -172,6 +172,20 @@ public sealed class DataObjectTests : IDisposable
     }
 
     [Fact]
+    public void Only_the_content_aspect_is_offered()
+    {
+        var (vm, _, obj) = Setup();
+        using (vm) using (obj)
+        {
+            ComIDataObject com = obj;
+            var thumb = Format("FileGroupDescriptorW", TYMED.TYMED_HGLOBAL);
+            thumb.dwAspect = DVASPECT.DVASPECT_THUMBNAIL;
+            Assert.Equal(unchecked((int)0x80040065), com.QueryGetData(ref thumb));            // DV_E_DVASPECT
+            Assert.Equal(unchecked((int)0x80040065), Assert.Throws<COMException>(() => com.GetData(ref thumb, out _)).HResult);
+        }
+    }
+
+    [Fact]
     public void Enumerator_supports_reset_skip_and_clone()
     {
         var (vm, _, obj) = Setup();
@@ -309,6 +323,59 @@ public sealed class DataObjectTests : IDisposable
         var s = GetContents(obj, 0);
         var ex = Assert.Throws<COMException>(() => ReadAll(s, 4096));
         Assert.Equal(unchecked((int)0x8003001E), ex.HResult);                                  // STG_E_READFAULT
+    }
+
+    private sealed class TrackedStream(Stream inner) : Stream
+    {
+        public bool Disposed { get; private set; }
+        protected override void Dispose(bool disposing) { if (disposing) { Disposed = true; inner.Dispose(); } base.Dispose(disposing); }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void Dispose_really_disposes_the_underlying_decoders_streams_and_the_count_tracks_it()
+    {
+        var (vm, drag, _) = Setup();
+        using (vm)
+        {
+            var tracked = new List<TrackedStream>();
+            using var obj = new VirtualFileDataObject(drag.Items, item => { var t = new TrackedStream(vm.OpenDragStream(item)); tracked.Add(t); return t; });
+            var a = drag.Items.ToList().FindIndex(i => i.RelativePath == "a.txt");
+            var big = drag.Items.ToList().FindIndex(i => i.RelativePath == "docs\\big.bin");
+            _ = GetContents(obj, a);
+            _ = GetContents(obj, big);
+            Assert.Equal(2, obj.OpenStreams);
+            Assert.All(tracked, t => Assert.False(t.Disposed));
+
+            obj.Dispose();
+            Assert.Equal(0, obj.OpenStreams);
+            Assert.All(tracked, t => Assert.True(t.Disposed, "a stream handed to the shell was not disposed"));
+        }
+    }
+
+    [Fact]
+    public void Reading_to_the_end_does_not_dispose_early_but_disposing_the_adapter_removes_it_from_the_count()
+    {
+        var (vm, drag, obj) = Setup();
+        using (vm) using (obj)
+        {
+            var a = drag.Items.ToList().FindIndex(i => i.RelativePath == "a.txt");
+            var s = GetContents(obj, a);
+            Assert.Equal(1, obj.OpenStreams);
+            ReadAll(s, 1000);
+            Assert.Equal(1, obj.OpenStreams);                                                   // finished reading, shell may still Stat
+            s.Stat(out var stat, 0);
+            Assert.Equal(Tree["a.txt"].Length, stat.cbSize);
+        }
     }
 
     [Fact]

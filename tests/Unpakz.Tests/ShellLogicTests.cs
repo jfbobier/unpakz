@@ -37,9 +37,10 @@ public class FriendlyErrorsTests
     public void Common_system_errors_are_translated()
     {
         Assert.Contains("not found", FriendlyErrors.Describe(new FileNotFoundException("x", "C:\\a.zip")), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("access", FriendlyErrors.Describe(new UnauthorizedAccessException("denied")), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Access was denied", FriendlyErrors.Describe(new UnauthorizedAccessException("xyz")), StringComparison.Ordinal);
         Assert.Contains("cancel", FriendlyErrors.Describe(new OperationCanceledException()), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("disk", FriendlyErrors.Describe(new IOException("There is not enough space on the disk.")), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("The disk is full", FriendlyErrors.Describe(new IOException("There is not enough space on the disk.")), StringComparison.Ordinal);
+        Assert.Contains("A file operation failed", FriendlyErrors.Describe(new IOException("sharing violation")), StringComparison.Ordinal);
         Assert.Contains("InvalidOperation", FriendlyErrors.Describe(new InvalidOperationException("boom")), StringComparison.Ordinal);
     }
 
@@ -143,6 +144,14 @@ public class VirtualFileListTests
         var cd = (int)BinaryPrimitives.ReadUInt32LittleEndian(zip.AsSpan(zip.Length - 22 + 16));
         BinaryPrimitives.WriteUInt16LittleEndian(zip.AsSpan(cd + 10), 99);
         Assert.Equal(ArchiveError.Unsupported, Assert.Throws<ArchiveException>(() => VirtualFileList.Build(ZipArchive.Open(zip))).Error);
+    }
+
+    [Fact]
+    public void A_259_character_path_can_be_dragged_and_a_260_character_path_cannot()
+    {
+        static ZipArchive WithPath(int length) => ZipArchive.Open(new ZipBuilder().Add(new string('a', 100) + "/" + new string('b', 100) + "/" + new string('c', length - 202), B("1")).Build());
+        Assert.Equal(259, Assert.Single(VirtualFileList.Build(WithPath(259)).Items).RelativePath.Length);
+        Assert.Equal(ArchiveError.LimitExceeded, Assert.Throws<ArchiveException>(() => VirtualFileList.Build(WithPath(260))).Error);
     }
 
     [Fact]

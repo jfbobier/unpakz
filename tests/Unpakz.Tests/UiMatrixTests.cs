@@ -324,6 +324,189 @@ public sealed class UiMatrixTests : IDisposable
         Assert.Equal(RunStatus.Success, vm.LastStatus);
     }
 
+    // ---- file list: sorting, searching ----
+    [Fact]
+    public void The_file_list_sorts_ascending_and_descending_by_every_column_and_ties_fall_back_to_the_path()
+    {
+        var b = new ZipBuilder().Add("b.txt", new byte[30]).Add("A.txt", new byte[10]).Add("c.txt", new byte[20]).Add("d/x.txt", new byte[10]).Build();
+        var dir = Path.Combine(_root, "sort");
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "s.zip"), b);
+        using var vm = new MainViewModel(new FakePicker(null), new FakePrompt(false));
+        Assert.True(vm.TryOpen(Path.Combine(dir, "s.zip")));
+        var list = new FileListViewModel(vm);
+        string[] Paths() => [.. Enumerable.Range(0, list.RowCount).Select(i => list.GetRow(i).Path)];
+
+        list.SortBy(ListColumn.Name, true);
+        Assert.Equal(["A.txt", "b.txt", "c.txt", "d", "d/x.txt"], Paths());               // case-insensitive order, folder before its contents
+        list.SortBy(ListColumn.Name, false);
+        Assert.Equal(["d/x.txt", "d", "c.txt", "b.txt", "A.txt"], Paths());
+
+        list.SortBy(ListColumn.Size, true);
+        Assert.Equal(["d", "A.txt", "d/x.txt", "c.txt", "b.txt"], Paths());               // folders (0) first; equal sizes ordered by path
+        list.SortBy(ListColumn.Size, false);
+        Assert.Equal(["b.txt", "c.txt", "d/x.txt", "A.txt", "d"], Paths());
+
+        list.SortBy(ListColumn.Packed, true);
+        Assert.Equal("d", Paths()[0]);
+        list.SortBy(ListColumn.Type, true);
+        Assert.Equal("d", Paths()[^1]);                                                    // "File" < "Folder", so the folder row comes last
+        list.SortBy(ListColumn.Type, false);
+        Assert.Equal("d", Paths()[0]);
+        list.SortBy(ListColumn.Modified, true);
+        Assert.Equal(5, list.RowCount);
+    }
+
+    [Fact]
+    public void A_folder_with_its_own_entry_is_listed_once_and_one_without_is_still_listed()
+    {
+        var b = new ZipBuilder().AddDirectory("docs").Add("docs/a.txt", [1]).Add("docs/sub/b.txt", [2]).Add("top.txt", [3]).Build();
+        var dir = Path.Combine(_root, "folders");
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "f.zip"), b);
+        using var vm = new MainViewModel(new FakePicker(null), new FakePrompt(false));
+        Assert.True(vm.TryOpen(Path.Combine(dir, "f.zip")));
+        var rows = Enumerable.Range(0, new FileListViewModel(vm).RowCount).Select(i => new FileListViewModel(vm).GetRow(i)).ToList();
+        Assert.Single(rows, r => r.Path == "docs");                                         // explicit entry: no duplicate implied row
+        Assert.Single(rows, r => r.Path == "docs/sub");                                     // implied: still shown
+        Assert.True(rows.Single(r => r.Path == "docs").EntryIndex >= 0);
+        Assert.Equal(-1, rows.Single(r => r.Path == "docs/sub").EntryIndex);
+    }
+
+    [Fact]
+    public void Size_and_packed_columns_sort_by_their_own_values()
+    {
+        var b = new ZipBuilder()
+            .Add("big-but-tiny-packed.txt", new byte[100_000], deflate: true)          // large, packs to almost nothing
+            .Add("small-but-incompressible.bin", TestData.Random(5_000, 1))            // smaller, packs to its own size
+            .Build();
+        var dir = Path.Combine(_root, "colsort");
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "c.zip"), b);
+        using var vm = new MainViewModel(new FakePicker(null), new FakePrompt(false));
+        Assert.True(vm.TryOpen(Path.Combine(dir, "c.zip")));
+        var list = new FileListViewModel(vm);
+        string First(bool asc) => list.GetRow(asc ? 0 : list.RowCount - 1).Path;
+
+        list.SortBy(ListColumn.Size, true);
+        Assert.Equal("small-but-incompressible.bin", First(true));
+        list.SortBy(ListColumn.Packed, true);
+        Assert.Equal("big-but-tiny-packed.txt", First(true));                               // the order flips: the columns are not interchangeable
+    }
+
+    [Fact]
+    public async Task A_picker_that_returns_blank_text_is_treated_as_cancel()
+    {
+        var picker = new FakePicker("   ");
+        using var vm = Open(Get("zip"), picker);
+        await vm.ExtractAllAsync();
+        Assert.Equal(1, picker.Calls);
+        Assert.Null(vm.LastStatus);
+        Assert.False(vm.IsBusy);
+    }
+
+    [Fact]
+    public void The_search_box_matches_anywhere_in_the_path_ignoring_case_and_clearing_it_restores_everything()
+    {
+        using var vm = Open(Get("zip"), new FakePicker(null));
+        var list = new FileListViewModel(vm);
+        var all = list.RowCount;
+        list.Filter = "GUIDE";
+        Assert.Equal(["docs/guide.txt"], Enumerable.Range(0, list.RowCount).Select(i => list.GetRow(i).Path));
+        list.Filter = "deep/";
+        Assert.Equal(["docs/deep/notes.txt"], Enumerable.Range(0, list.RowCount).Select(i => list.GetRow(i).Path));
+        list.Filter = "";
+        Assert.Equal(all, list.RowCount);
+        list.Filter = null!;
+        Assert.Equal(all, list.RowCount);
+    }
+
+    [Theory]
+    [InlineData(0L, "0 B")]
+    [InlineData(1023L, "1023 B")]
+    [InlineData(1024L, "1 KB")]
+    [InlineData(1536L, "1.5 KB")]
+    [InlineData(1048575L, "1024 KB")]
+    [InlineData(1048576L, "1 MB")]
+    [InlineData(5L * 1024 * 1024 * 1024, "5 GB")]
+    [InlineData(3L * 1024 * 1024 * 1024 * 1024, "3 TB")]
+    [InlineData(5000L * 1024 * 1024 * 1024 * 1024, "5000 TB")]
+    public void Sizes_are_shown_in_plain_units(long bytes, string expected) => Assert.Equal(expected, MainViewModel.FormatSize(bytes));
+
+    // ---- busy handling and progress edge cases ----
+    private sealed class GatedLocalFs : IFileSystem
+    {
+        private readonly LocalFileSystem _inner = new();
+        private int _writes;
+        public ManualResetEventSlim Gate { get; } = new(false);
+        public PathKind GetKind(string path) => _inner.GetKind(path);
+        public void CreateDirectory(string path) => _inner.CreateDirectory(path);
+        public IFileWriter CreateFile(string finalPath, long preallocate) => new W(_inner.CreateFile(finalPath, preallocate), this);
+
+        private sealed class W(IFileWriter w, GatedLocalFs o) : IFileWriter
+        {
+            public void Write(ReadOnlySpan<byte> data) { if (Interlocked.Increment(ref o._writes) > 1) o.Gate.Wait(); w.Write(data); }
+            public void Commit(DateTime? t, bool overwrite) => w.Commit(t, overwrite);
+            public void Dispose() => w.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task While_an_extraction_is_running_other_extractions_and_selections_are_refused_without_asking()
+    {
+        var dir = Path.Combine(_root, "gated");
+        Directory.CreateDirectory(dir);
+        var b = new ZipBuilder();
+        for (var i = 0; i < 6; i++) b.Add($"f{i}.bin", TestData.Random(100_000, i));
+        File.WriteAllBytes(Path.Combine(dir, "g.zip"), b.Build());
+        var picker = new FakePicker(Path.Combine(_root, "gated-out"));
+        var gate = new GatedLocalFs();
+        using var vm = new MainViewModel(picker, new FakePrompt(false), null, gate);
+        Assert.True(vm.TryOpen(Path.Combine(dir, "g.zip")));
+        var first = vm.ExtractAllAsync();
+        var spin = Environment.TickCount64;
+        while (!(vm.IsBusy && vm.Progress > 0) && Environment.TickCount64 - spin < 10_000) await Task.Delay(5);
+        Assert.True(vm.IsBusy);
+
+        await vm.ExtractAllAsync();
+        await vm.ExtractHereAsync();
+        await vm.ExtractToNamedFolderAsync();
+        await vm.ExtractSelectedAsync([0]);
+        Assert.Equal(1, picker.Calls);                                                // none of them even opened the folder dialog
+        Assert.True(vm.IsBusy);
+
+        gate.Gate.Set();
+        await first;
+        Assert.Equal(RunStatus.Success, vm.LastStatus);
+        Assert.False(vm.IsBusy);
+    }
+
+    [Fact]
+    public async Task Progress_reaches_one_even_when_the_archive_holds_only_empty_files()
+    {
+        var dir = Path.Combine(_root, "empties");
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "e.zip"), new ZipBuilder().Add("a", []).Add("b", []).Build());
+        using var vm = new MainViewModel(new FakePicker(Path.Combine(_root, "empties-out")), new FakePrompt(false));
+        Assert.True(vm.TryOpen(Path.Combine(dir, "e.zip")));
+        await vm.ExtractAllAsync();
+        Assert.Equal(RunStatus.Success, vm.LastStatus);
+        Assert.Equal(1.0, vm.Progress);
+    }
+
+    [Fact]
+    public void Opening_another_archive_releases_the_previous_one()
+    {
+        using var vm = new MainViewModel(new FakePicker(null), new FakePrompt(false));
+        Assert.True(vm.TryOpen(NewSource(Get("rar5-multivolume"))));
+        var live = MappedFile.LiveMappings;
+        Assert.True(vm.TryOpen(NewSource(Get("zip"))));
+        Assert.True(MappedFile.LiveMappings < live, "the first archive's volumes must be unmapped when another is opened");
+        Assert.False(vm.TryOpen(Path.Combine(_root, "does-not-exist.zip")));
+        Assert.False(vm.IsOpen);                                                      // a failed open also closes the old one
+        Assert.Equal(string.Empty, vm.Summary);
+    }
+
     // ---- threading: dialogs belong to the UI thread ----
     private sealed class ThreadTaggedContext : SynchronizationContext
     {

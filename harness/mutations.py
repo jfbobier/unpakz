@@ -17,6 +17,22 @@ FLT = "src/Unpakz.Core/Rar/RarFilters.cs"
 VLC = "src/Unpakz.Engine/VolumeLocator.cs"
 MAP = "src/Unpakz.Engine/MappedFile.cs"
 ASR = "src/Unpakz.Engine/ArchiveSource.cs"
+ESL = "src/Unpakz.Engine/EntrySelection.cs"
+EST = "src/Unpakz.Engine/EntryStream.cs"
+FER = "src/Unpakz.Engine/FriendlyErrors.cs"
+DNM = "src/Unpakz.Engine/DestinationNaming.cs"
+VFL = "src/Unpakz.Engine/VirtualFileList.cs"
+FAP = "src/Unpakz.Engine/FileAssociationPlan.cs"
+ERN = "src/Unpakz.Engine/ExtractionRunner.cs"
+MVM = "src/Unpakz.Presentation/MainViewModel.cs"
+FLM = "src/Unpakz.Presentation/FileListViewModel.cs"
+CLI = "src/Unpakz.Cli/CliApp.cs"
+SAD = "src/Unpakz.Windows/StreamAdapter.cs"
+VDO = "src/Unpakz.Windows/VirtualFileDataObject.cs"
+NAT = "src/Unpakz.Windows/NativeMethods.cs"
+RGW = "src/Unpakz.Windows/RegistryWriter.cs"
+MFM = "src/Unpakz.App/MainForm.cs"
+FLF = "src/Unpakz.App/FileListForm.cs"
 
 MUTANTS = [
     # --- PathGuard
@@ -296,6 +312,122 @@ MUTANTS = [
     ("MF7", MAP, "_view?.SafeMemoryMappedViewHandle.ReleasePointer();", ""),
     ("AS1", ASR, "catch\n        {\n            foreach (var m in mapped) m.Dispose();\n            throw;", "catch\n        {\n            throw;"),
     ("AS2", ASR, "var paths = VolumeLocator.Find(path, limits.MaxVolumes);", "var paths = (IReadOnlyList<string>)[Path.GetFullPath(path)];"),
+    # --- selection, planner filter, preflight
+    ("ESL1", ESL, r"name.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)", r"name.Split(['/'], StringSplitOptions.RemoveEmptyEntries)"),
+    ("ESL3", ESL, "if (entries[index].Kind == EntryKind.Directory) folders.Add(Normalize(entries[index].Name));", "if (entries[index].Kind == (EntryKind)99) folders.Add(Normalize(entries[index].Name));"),
+    ("ESL6", ESL, "if (!folders.Contains(path[..slash])) continue;", "if (path.Length < 0) continue;"),
+    ("PLF", PLN, "if (options.EntryFilter is { } filter && !filter(e)) continue;", ""),
+    ("PF1", EXT, "if (kind == PathKind.None) continue;", ""),
+    ("PF2", EXT, "if (kind == PathKind.Directory || policy == OverwritePolicy.Fail)", "if (kind == PathKind.Directory)"),
+    ("PF3", EXT, "if (kind == PathKind.Directory || policy == OverwritePolicy.Fail)", "if (policy == OverwritePolicy.Fail)"),
+    ("PF4", EXT, "        Preflight(fs, root, plan, options.Overwrite);\n", ""),
+    # --- streaming entry reader
+    ("ES1", EST, "ArgumentOutOfRangeException.ThrowIfLessThan(queueCapacity, 1);", ""),
+    ("ES7", EST, "                throw Rethrow(failure);", "                return 0;"),
+    ("ES8", EST, "        Interlocked.Add(ref _counters.Buffered, -c.Length);", ""),
+    ("ES10", EST, "        ObjectDisposedException.ThrowIf(_disposed, this);\n        if (buffer.IsEmpty) return 0;", "        if (buffer.IsEmpty) return 0;"),
+    ("ES11", EST, "                if (_offset == c.Length) Release();", ""),
+    ("ES12", EST, "            _cts.Cancel();\n", ""),
+    # --- friendly errors, naming
+    ("FE1", FER, "if (sb.Length >= MaxDetail) { sb.Append('…'); break; }", ""),
+    ("FE2", FER, "sb.Append(char.IsControl(c) ? ' ' : c);", "sb.Append(c);"),
+    ("FE3", FER, 'io.Message.Contains("space", StringComparison.OrdinalIgnoreCase)', 'io.Message.Contains("spacx", StringComparison.OrdinalIgnoreCase)'),
+    ("FE4", FER, "ArchiveException { Error: ArchiveError.MissingVolume } a =>", "ArchiveException { Error: ArchiveError.Conflict } a =>"),
+    ("FE5", FER, "UnauthorizedAccessException => ", "UnauthorizedAccessException when false => "),
+    ("DN1", DNM, "if (name.Length == 0 || !PathGuard.Validate(name).IsSafe) name = \"extracted\";", "if (name.Length == 0) name = \"extracted\";"),
+    ("DN2", DNM, "if (string.Equals(name, file, StringComparison.OrdinalIgnoreCase)) name += \" (extracted)\";", ""),
+    ("DN4", DNM, "\\.part\\d+\\.rar$|", ""),
+    ("DN5", DNM, "RegexOptions.IgnoreCase | RegexOptions.CultureInvariant", "RegexOptions.CultureInvariant"),
+    # --- drag list and descriptor
+    ("VF1", VFL, "if (path.Length > MaxDescriptorName)", "if (path.Length >= MaxDescriptorName)"),
+    ("VF2", VFL, r"it.RelativePath.Replace('/', '\\')", "it.RelativePath"),
+    ("VF3", VFL, "if (!item.IsDirectory) flags |= FdFileSize;", ""),
+    ("VF4", VFL, "if (item.LastWriteLocal is not null) flags |= FdWritesTime;", ""),
+    ("VF5", VFL, "item.IsDirectory ? AttrDirectory : AttrNormal", "item.IsDirectory ? AttrNormal : AttrDirectory"),
+    ("VF6", VFL, "(uint)((ulong)item.Size >> 32)", "(uint)((ulong)item.Size >> 31)"),
+    ("VF7", VFL, "if (item.RelativePath.Length >= NameChars)", "if (item.RelativePath.Length > NameChars)"),
+    ("VF8", VFL, "var keep = EntrySelection.Expand(archive.Entries, selection);", "var keep = new HashSet<int>(selection);"),
+    # --- registry plan
+    ("FA1", FAP, "if (exePath.Contains('\"', StringComparison.Ordinal)) throw", "if (false) throw"),
+    ("FA2", FAP, r"exePath[2] == '\\'", "exePath[2] == '/'"),
+    ("FA3", FAP, "            w.Add(new($@\"Software\\Classes\\{ext}\\OpenWithProgids\", ProgId, string.Empty));\n", ""),
+    ("FA4", FAP, '        registry.DeleteKeyTree(@"Software\\Unpakz");\n', ""),
+    ("FA5", FAP, "foreach (var ext in Extensions) registry.DeleteValue($@\"Software\\Classes\\{ext}\\OpenWithProgids\", ProgId);", ""),
+    ("FA6", FAP, '        registry.DeleteValue(@"Software\\RegisteredApplications", "Unpakz");\n', ""),
+    # --- runner and view-models
+    ("ER1", ERN, "r.Files == 1", "r.Files == 2"),
+    ("ER2", ERN, "if (r.Skipped.Count > 0)", "if (r.Skipped.Count > 100000)"),
+    ("ER4", ERN, "options = options.WithFilter(e => keep.Contains(e.Index));", ""),
+    ("ER5", ERN, "(ex as ArchiveException)?.Error", "null"),
+    ("VM1", MVM, "if (!IsOpen || IsBusy) return;\n        var destination", "if (!IsOpen) return;\n        var destination"),
+    ("VM2", MVM, "if (!IsOpen || IsBusy) return;\n        var context", "if (!IsOpen) return;\n        var context"),
+    ("VM3", MVM, 'Status = "Extracting…";', ""),
+    ("VM4", MVM, "if (outcome.Status == RunStatus.Success) Progress = 1;", ""),
+    ("VM6", MVM, "new ExtractOptions { Overwrite = OverwritePolicy.Overwrite }", "new ExtractOptions { Overwrite = OverwritePolicy.Skip }"),
+    ("VM7", MVM, 'Status = "Select one or more files first.";\n            return Task.CompletedTask;', 'Status = "Select one or more files first.";'),
+    ("VM9", MVM, "if (string.IsNullOrWhiteSpace(destination)) return;", "if (destination is null) return;"),
+    ("VM10", MVM, "context.Send(_ => answer = _prompt.ConfirmReplace(message), null);", "answer = _prompt.ConfirmReplace(message);"),
+    ("VM11", MVM, "public void Cancel() => _cts?.Cancel();", "public void Cancel() => _ = _cts;"),
+    ("VM12", MVM, "while (v >= 1024 && u < units.Length - 1)", "while (v > 1024 && u < units.Length - 1)"),
+    ("VM13", MVM, "        Close();\n        try", "        try"),
+    ("VM14", MVM, "u == 0 ? \"0\" : \"0.#\"", "\"0.#\""),
+    ("FL1", FLM, "r.Path.Contains(_filter, StringComparison.OrdinalIgnoreCase)", "r.Path.Contains(_filter, StringComparison.Ordinal)"),
+    ("FL2", FLM, "return _ascending ? c : -c;", "return c;"),
+    ("FL3", FLM, "if (c == 0) c = byPath(a, b);", ""),
+    ("FL4", FLM, "if (!explicitFolders.Contains(folder) && implied.Add(folder))", "if (implied.Add(folder))"),
+    ("FL5", FLM, "ListColumn.Size => (a, b) => a.Size.CompareTo(b.Size),", "ListColumn.Size => (a, b) => a.Packed.CompareTo(b.Packed),"),
+    ("FL6", FLM, "if (row.IsFolder) folders.Add(row.Path);", ""),
+    ("FL7", FLM, "if (row.EntryIndex >= 0) picked.Add(row.EntryIndex);", ""),
+    # --- command line
+    ("CL1", CLI, 'case "--overwrite": policy = OverwritePolicy.Overwrite; break;', 'case "--overwrite": policy = OverwritePolicy.Skip; break;'),
+    ("CL2", CLI, 'case "--skip": policy = OverwritePolicy.Skip; break;', 'case "--skip": policy = OverwritePolicy.Overwrite; break;'),
+    ("CL3", CLI, 'case "--here": here = true; break;', 'case "--here": break;'),
+    ("CL4", CLI, 'if (hit.Count == 0) { error.WriteLine($"Not in the archive: {Sanitize(p)}"); return Failed; }', ""),
+    ("CL5", CLI, 'return failures == 0 ? Ok : Failed;', 'return Ok;'),
+    ("CL6", CLI, "destination ??= here ? DestinationNaming.DirectoryOf(archivePath) : DestinationNaming.FolderNextTo(archivePath);", "destination ??= DestinationNaming.FolderNextTo(archivePath);"),
+    ("CL7", CLI, "if (args.Length < 2) { error.WriteLine(\"Missing archive. Try: unpakz --help\"); return Usage; }", ""),
+    ("CL8", CLI, "if (command is not (\"l\" or \"x\" or \"t\")) { error.WriteLine($\"Unknown command '{command}'. Try: unpakz --help\"); return Usage; }", ""),
+    ("CL9", CLI, "private static string Sanitize(string name) => new(name.Select(c => char.IsControl(c) ? '?' : c).ToArray());", "private static string Sanitize(string name) => name;"),
+    ("CL10", CLI, "if (args[i].StartsWith('-')) { error.WriteLine($\"Unknown option '{args[i]}'.\"); return Usage; }", ""),
+    # --- Windows layer (run with UNPAKZ_MUTATE_MODE=windows; COM ids use the default filter, UI ids use UNPAKZ_MUTATE_WIN_FILTER=FullyQualifiedName~UiTests)
+    ("SA1", SAD, 'if (target < _position) throw new COMException("This stream cannot move backwards.", StgEInvalidFunction);', ""),
+    ("SA2", SAD, "1 => _position + dlibMove,", "1 => dlibMove,"),
+    ("SA3", SAD, "2 => _length + dlibMove,", "2 => dlibMove,"),
+    ("SA4", SAD, "                _position += total;\n", ""),
+    ("SA5", SAD, "if (pcbRead != IntPtr.Zero) Marshal.WriteInt32(pcbRead, total);", ""),
+    ("SA7", SAD, "cbSize = _length, grfMode = 0", "cbSize = 0, grfMode = 0"),
+    ("SA8", SAD, 'public void Write(byte[] pv, int cb, IntPtr pcbWritten) => throw new COMException("The stream is read-only.", StgEAccessDenied);', 'public void Write(byte[] pv, int cb, IntPtr pcbWritten) => throw new COMException("The stream is read-only.", StgEInvalidFunction);'),
+    ("SA9", SAD, 'catch (Exception ex)\n        {\n            throw new COMException($"The file could not be read: {ex.Message}", StgEReadFault);\n        }', 'catch (Exception ex)\n        {\n            throw new COMException($"The file could not be read: {ex.Message}", EFail);\n        }'),
+    ("SA10", SAD, "        _onDispose?.Invoke(this);\n", ""),
+    ("SA11", SAD, "pv.Length));\n                _position", "pv.Length) - 1);\n                _position"),
+    ("VD1", VDO, "medium = HGlobal(_descriptor);", "medium = HGlobal([]);"),
+    ("VD2", VDO, "medium = HGlobal(BitConverter.GetBytes(DropEffectCopy));", "medium = HGlobal(BitConverter.GetBytes(DropEffectCopy + 1));"),
+    ("VD3", VDO, "if ((uint)index >= (uint)_items.Count || _items[index].IsDirectory)", "if ((uint)index >= (uint)_items.Count)"),
+    ("VD4", VDO, "return (format.tymed & wanted) != 0 ? 0 : DvETymed;", "return 0;"),
+    ("VD5", VDO, "if (format.dwAspect != DVASPECT.DVASPECT_CONTENT) return DvEDvAspect;", ""),
+    ("VD5B", VDO, "if (f.dwAspect != DVASPECT.DVASPECT_CONTENT) throw new COMException(\"Aspect not supported.\", DvEDvAspect);", ""),
+    ("VD6", VDO, "if (direction != DATADIR.DATADIR_GET) throw", "if (direction == DATADIR.DATADIR_SET && false) throw"),
+    ("VD8", VDO, "foreach (var s in open) s.Dispose();", ""),
+    ("VD9", VDO, "        ObjectDisposedException.ThrowIf(_disposed, this);\n        medium = default;", "        medium = default;"),
+    ("VD10", VDO, "lock (_gate) _streams.Add(adapter);", ""),
+    ("VD11", VDO, "return fetched == celt ? 0 : 1;", "return 0;"),
+    ("VD12", VDO, "if (format.cfFormat == CfDescriptor || format.cfFormat == CfDropEffect) wanted = TYMED.TYMED_HGLOBAL;", "if (format.cfFormat == CfDescriptor) wanted = TYMED.TYMED_HGLOBAL;"),
+    ("NM1", NAT, "bytes.CopyTo(new Span<byte>((void*)p, bytes.Length));", ""),
+    ("RW1", RGW, "k.SetValue(name ?? string.Empty, value, RegistryValueKind.String);", "k.SetValue(name ?? \"x\", value, RegistryValueKind.String);"),
+    ("RW2", RGW, "k?.DeleteValue(name, throwOnMissingValue: false);", ""),
+    ("RW3", RGW, "Registry.CurrentUser.DeleteSubKeyTree(Full(key), throwOnMissingSubKey: false);", ""),
+    ("UI1", MFM, "_cancel.Visible = _model.IsBusy;", "_cancel.Visible = false;"),
+    ("UI2", MFM, "_extractTo.Enabled = idle;", "_extractTo.Enabled = open;"),
+    ("UI3", MFM, "_subtitle.Text = open ? _model.Details :", "_subtitle.Text = open ? _model.Summary :"),
+    ("UI4", MFM, "{Shorten(folder, 18)}", "{Shorten(folder, 180)}"),
+    ("UI5", MFM, "if (e.KeyCode == Keys.Escape && _model.IsBusy) _model.Cancel();", ""),
+    ("UI6", MFM, "_progress.Visible = _model.IsBusy || _model.Progress > 0;", "_progress.Visible = true;"),
+    ("UI7", MFM, "e.Effect = e.Data?.GetDataPresent(DataFormats.FileDrop) == true ? DragDropEffects.Copy : DragDropEffects.None;", "e.Effect = DragDropEffects.Copy;"),
+    ("UI8", MFM, "        _list?.Close();\n        _list = null;\n        Render();", "        Render();"),
+    ("UI9", FLF, '_extract.Text = n > 1 ? $"Extract {n} selected to…" : "Extract selected to…";', '_extract.Text = "Extract selected to…";'),
+    ("UI10", FLF, "_extract.Enabled = n > 0 && !_main.IsBusy;", "_extract.Enabled = true;"),
+    ("UI11", MFM, "_extractNamed.Enabled = idle;", "_extractNamed.Enabled = true;"),
+    ("UI12", MFM, "if (_list is { IsDisposed: false }) { _list.Activate(); return; }", ""),
     # --- DOS time
     ("D2", DOS, "if (day > DateTime.DaysInMonth(year, month)) return false;", ""),
     ("D3", DOS, "hour > 23", "hour > 24"),
@@ -305,6 +437,9 @@ MUTANTS = [
 
 # Mutants that survive by design. Each needs a reason a reviewer can challenge.
 EQUIVALENT = {
+    "ES1": "BlockingCollection's constructor rejects a capacity below 1 with the same ArgumentOutOfRangeException",
+    "ES10": "a disposed BlockingCollection throws the same ObjectDisposedException from TryTake",
+    "VM14": "the format \"0.#\" prints whole numbers exactly like \"0\"",
     "RD44": "for length codes 4..7 the general formula (lbits = code/4 - 1 = 0, base 4|(code&3)) equals the small-code formula",
     "RD80": "the distance code that follows Peek32 always calls _ldd.Decode, whose Peek16 enforces the same end-of-block bound",
     "RD81": "bit 0 of a 16-bit peek is never observable: every use shifts right by >= 7 or masks it (Huffman decode masks 0xFFFE itself)",

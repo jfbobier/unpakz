@@ -22,18 +22,34 @@ for sig in (signal.SIGINT, signal.SIGTERM):
     signal.signal(sig, lambda *_: sys.exit(130))
 
 TIMEOUT = 240   # seconds; a mutant that makes the code hang is detected, not stuck forever
+MODE = os.environ.get("UNPAKZ_MUTATE_MODE", "linux")      # "windows": run the Windows test project in the synced Downloads copy
+WIN_FILTER = os.environ.get("UNPAKZ_MUTATE_WIN_FILTER", "FullyQualifiedName~DataObjectTests|FullyQualifiedName~RegistryTests")
 
 
 def run_tests():
+    """Returns (verdict, output). Verdicts: killed, survived, invalid, hang. Anything else is an infrastructure failure and aborts the run."""
+    if MODE == "windows":
+        cmd = ["bash", "scripts/winsync.sh", ".\\scripts\\wintest-run.ps1 -Filter '%s'" % WIN_FILTER]
+        limit = TIMEOUT * 2
+    else:
+        cmd = ["dotnet", "test", "Unpakz.slnx", "-c", "Release", "--nologo", "-v", "q"]
+        limit = TIMEOUT
     try:
-        p = subprocess.run(["dotnet", "test", "Unpakz.slnx", "-c", "Release", "--nologo", "-v", "q"], cwd=ROOT, capture_output=True, text=True,
-                           env={**os.environ, "UNPAKZ_REQUIRE_ORACLE": "1"}, timeout=TIMEOUT)
+        p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=limit, env={**os.environ, "UNPAKZ_REQUIRE_ORACLE": "1"})
     except subprocess.TimeoutExpired:
         subprocess.run(["pkill", "-f", "testhost"], check=False)
-        return 1, False
+        if MODE == "windows":
+            subprocess.run(["powershell.exe", "-NoProfile", "-Command", "Get-Process testhost -ErrorAction SilentlyContinue | Stop-Process -Force"], check=False)
+        return "hang", ""
     out = p.stdout + p.stderr
-    compile_error = " error CS" in out or " error CA" in out or " error xUnit" in out or " error IDE" in out
-    return p.returncode, compile_error
+    if any(m in out for m in (" error CS", " error CA", " error xUnit", " error IDE", " error CS")):
+        return "invalid", out
+    if "Failed!" in out or "Test Run Failed" in out or "Test host process crashed" in out or "test run was aborted" in out.lower():
+        return "killed", out
+    if "Passed!" in out and p.returncode == 0:
+        return "survived", out
+    return "infra", out
+
 
 flt = sys.argv[1] if len(sys.argv) > 1 else ""
 if flt == "--check":   # fast: only verify every mutation still applies exactly once
@@ -63,12 +79,16 @@ for mid, rel, find, repl in selected:
         continue
     with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(text.replace(find, repl))
-    rc, compile_error = run_tests()
+    verdict, out = run_tests()
     restore()
-    if compile_error:
+    if verdict == "infra":
+        print(f"{mid:6} INFRASTRUCTURE FAILURE: neither a pass nor a fail was reported; aborting so no verdict is invented.")
+        print(out[-1500:])
+        sys.exit(3)
+    if verdict == "invalid":
         results["invalid"].append(mid); print(f"{mid:6} INVALID (does not compile)")
-    elif rc != 0:
-        results["killed"] += 1; print(f"{mid:6} killed")
+    elif verdict in ("killed", "hang"):
+        results["killed"] += 1; print(f"{mid:6} killed" + ("  (hang: timeout)" if verdict == "hang" else ""))
     else:
         results["survived"].append(mid)
         why = EQUIVALENT.get(mid)
@@ -78,4 +98,6 @@ for mid, rel, find, repl in selected:
 bad = [m for m in results["survived"] if m not in EQUIVALENT] + results["invalid"] + results["stale"]
 print(f"\n{len(selected)} mutants in {time.time()-t0:.0f}s: killed {results['killed']}, survived {len(results['survived'])} "
       f"(unaccepted {len([m for m in results['survived'] if m not in EQUIVALENT])}), invalid {len(results['invalid'])}, stale {len(results['stale'])}")
+if MODE == "windows":   # never leave a mutated tree in the Windows copy
+    subprocess.run(["bash", "scripts/winsync.sh", "'restored'"], cwd=ROOT, check=False, capture_output=True)
 sys.exit(1 if bad else 0)
