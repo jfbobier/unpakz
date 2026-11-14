@@ -11,4 +11,9 @@
     <Deterministic>true</Deterministic>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+  <!-- If Linux/WSL and Windows ever build the same tree, keep their intermediate and output folders apart. -->
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj-win/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)bin-win/$(MSBuildProjectName)/</BaseOutputPath>
+  </PropertyGroup>
 </Project>

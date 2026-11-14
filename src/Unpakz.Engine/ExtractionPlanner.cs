@@ -31,6 +31,8 @@ public static class ExtractionPlanner
         {
             var e = entries[i];
 
+            if (options.EntryFilter is { } filter && !filter(e)) continue;
+
             if (e.Kind == EntryKind.Symlink) { skipped.Add(new SkippedEntry(e.Name, SkipReason.Symlink)); continue; }
             if (e.Kind == EntryKind.Special) { skipped.Add(new SkippedEntry(e.Name, SkipReason.SpecialFile)); continue; }
 

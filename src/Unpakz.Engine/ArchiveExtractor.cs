@@ -58,6 +58,8 @@ public static class ArchiveExtractor
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
         var plan = ExtractionPlanner.Plan(archive, root, options);
 
+        Preflight(fs, root, plan, options.Overwrite);
+
         EnsureRoot(fs, root);
         var verified = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { root };
         var skipped = new List<SkippedEntry>(plan.Skipped);
@@ -118,6 +120,23 @@ public static class ArchiveExtractor
 
         state.FilesCompleted++;
         state.Report();
+    }
+
+    /// <summary>
+    /// With the default policy an existing file is a hard stop: find that out for every file first, so the destination is
+    /// never left half-written because of a conflict that was knowable up front. (A directory in the way is a conflict under any policy.)
+    /// </summary>
+    private static void Preflight(IFileSystem fs, string root, ExtractionPlan plan, OverwritePolicy policy)
+    {
+        foreach (var item in plan.Items)
+        {
+            if (item.IsDirectory) continue;
+            var kind = fs.GetKind(ResolveUnderRoot(root, item.RelativePath));
+            if (kind == PathKind.None) continue;
+
+            if (kind == PathKind.Directory || policy == OverwritePolicy.Fail)
+                throw new ArchiveException($"'{ExtractionPlanner.Printable(item.RelativePath)}' already exists.", ArchiveError.Conflict);
+        }
     }
 
     internal static string ResolveUnderRoot(string root, string relativePath)

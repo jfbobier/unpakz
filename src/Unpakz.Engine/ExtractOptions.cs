@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Unpakz.Core;
 
@@ -25,12 +26,29 @@ public sealed record SkippedEntry(string Name, SkipReason Reason);
 
 public sealed class ExtractOptions
 {
+    /// <summary>A copy of these options with a different entry filter.</summary>
+    public ExtractOptions WithFilter(Func<ArchiveEntry, bool>? filter) => new()
+    {
+        PathGuard = PathGuard,
+        Limits = Limits,
+        Overwrite = Overwrite,
+        SkipUnsafePaths = SkipUnsafePaths,
+        EntryFilter = filter,
+        RestoreTimestamps = RestoreTimestamps,
+        MaxTotalSize = MaxTotalSize,
+        MaxFullPathLength = MaxFullPathLength,
+        PreallocateLimit = PreallocateLimit,
+    };
+
     public PathGuardOptions PathGuard { get; init; } = new();
     public ArchiveLimits Limits { get; init; } = new();
     public OverwritePolicy Overwrite { get; init; } = OverwritePolicy.Fail;
 
     /// <summary>If false (default) any unsafe entry name aborts the whole extraction before anything is written.</summary>
     public bool SkipUnsafePaths { get; init; }
+
+    /// <summary>When set, only entries for which this returns true are planned and extracted (unselected entries are not even validated).</summary>
+    public Func<ArchiveEntry, bool>? EntryFilter { get; init; }
 
     public bool RestoreTimestamps { get; init; } = true;
 

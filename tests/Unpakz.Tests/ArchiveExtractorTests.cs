@@ -166,6 +166,35 @@ public class ArchiveExtractorTests
     }
 
     [Fact]
+    public void A_conflict_on_a_later_file_is_found_before_anything_is_written()
+    {
+        var fs = new InMemoryFileSystem(Dest);
+        fs.Dirs.Add(Dest);
+        fs.Files[P("c.txt")] = "OLD"u8.ToArray();
+        var zip = new ZipBuilder().Add("a.txt", "A"u8.ToArray()).Add("sub/b.txt", "B"u8.ToArray()).Add("c.txt", "C"u8.ToArray()).Build();
+
+        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() => Run(zip, fs)).Error);
+        Assert.Empty(fs.TempFiles);                                   // no work was done
+        Assert.Empty(fs.CreatedDirs);                                 // not even the folders
+        Assert.Equal(["OLD"], fs.Files.Where(kv => !kv.Key.EndsWith(".tmp", StringComparison.Ordinal)).Select(kv => System.Text.Encoding.UTF8.GetString(kv.Value)));
+    }
+
+    [Fact]
+    public void A_directory_or_link_where_a_file_is_to_go_is_also_a_preflight_conflict()
+    {
+        var zip = new ZipBuilder().Add("a.txt", "A"u8.ToArray()).Add("b.txt", "B"u8.ToArray()).Build();
+        var withDir = new InMemoryFileSystem(Dest);
+        withDir.Dirs.Add(Dest); withDir.Dirs.Add(P("b.txt"));
+        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() => Run(zip, withDir, new ExtractOptions { Overwrite = OverwritePolicy.Overwrite })).Error);
+        Assert.Empty(withDir.TempFiles);
+
+        var withLink = new InMemoryFileSystem(Dest);
+        withLink.Dirs.Add(Dest); withLink.Links.Add(P("b.txt"));
+        Assert.Equal(ArchiveError.Conflict, Assert.Throws<ArchiveException>(() => Run(zip, withLink)).Error);
+        Assert.Empty(withLink.TempFiles);
+    }
+
+    [Fact]
     public void Skip_policy_keeps_existing_file_and_reports_it()
     {
         var (zip, fs) = WithExisting();

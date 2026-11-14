@@ -24,6 +24,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Unpakz.Engine\Unpakz.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Unpakz.Presentation\Unpakz.Presentation.csproj" />
+    <ProjectReference Include="..\..\src\Unpakz.Cli\Unpakz.Cli.csproj" />
     <ProjectReference Include="..\..\src\Unpakz.Core\Unpakz.Core.csproj" />
   </ItemGroup>
 

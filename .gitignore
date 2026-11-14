@@ -7,3 +7,6 @@ corpus/generated/
 bench/BenchmarkDotNet.Artifacts/
 tools/
 __pycache__/
+obj-win/
+bin-win/
+artifacts/
